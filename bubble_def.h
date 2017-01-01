@@ -36,6 +36,8 @@ typedef struct _tagPackHead {
     char          pData[1];      // package data ,can be MsgPackData or MediaPackData struct
 } PackHead;
 
+#define GET_PACKSIZE(data_size) (STRUCT_MEMBER_POS(PackHead, pData) + (data_size))
+
 typedef struct _tagMsgPackData {
     unsigned int  uiLength;      // length of package except uiLength 
     char          cMsgType[4];   // type of message,can be value of _enMsgType type

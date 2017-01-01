@@ -7,6 +7,8 @@
 #include "bubble_def.h"
 #include "session.h"
 
+PackHead* write_packhead(uint data_size, char cPackType, char *buffer);
+
 bool verify_user(Session& session, const std::string& username, const std::string& password);
 bool send_user_creds(Session& session, const std::string& username, const std::string& password);
 bool recv_verify_user_result(Session& session);

@@ -13,10 +13,16 @@ static char buffer[BUF_SIZE];
 
 int main()
 {
+    int nbytes;
     Session session(SERVER_IP, SERVER_PORT);
 
     session.send(BUBBLE_INIT_SESSION, sizeof(BUBBLE_INIT_SESSION) - 1);
-    session.receive_til_full(buffer, INIT_HTTP_RESP_SIZE);
+    nbytes = session.receive_til_full(buffer, INIT_HTTP_RESP_SIZE);
+    if (nbytes <= 0)
+    {
+        LOG_ERR("Failed to initialize bubble session");
+        return 1;
+    }
 
     if (!verify_user(session, "admin", "123"))
     {
@@ -28,9 +34,40 @@ int main()
     return 0;
 }
 
+PackHead* write_packhead(uint data_size, char cPackType, char *buffer)
+{
+    PackHead *packhead = (PackHead *)buffer;
+    struct timespec timetic;
+
+    packhead->cHeadChar = PACKHEAD_MAGIC;
+    packhead->cPackType = cPackType;
+    clock_gettime(CLOCK_MONOTONIC, &timetic);
+    packhead->uiTicket = htonl(timetic.tv_sec + timetic.tv_nsec/1000);
+    packhead->uiLength = htonl(STRUCT_MEMBER_POS(PackHead, pData)
+                               - STRUCT_MEMBER_POS(PackHead, cPackType)
+                               + data_size);
+
+    return packhead;
+}
+
 int open_stream(uint channel, uint stream_id)
 {
+    PackHead *packhead;
     BubbleOpenStream openStreamPack;
+    size_t packsize;
+
+    std::printf("Opening stream: channel=%ud stream_id=%ud\n", channel, stream_id);
+
+    packsize = STRUCT_MEMBER_POS(PackHead, pData) + sizeof(openStreamPack);
+    assert(packsize <= BUF_SIZE);
+
+    packhead = write_packhead(sizeof(BubbleOpenStream), PT_OPENSTREAM, buffer);
+
+    openStreamPack.uiChannel = channel;
+    openStreamPack.uiStreamId = stream_id;
+    openStreamPack.uiOpened = 1;
+
+    return 0;
 }
 
 bool verify_user(Session& session, const std::string& username, const std::string& password)
@@ -50,45 +87,51 @@ bool verify_user(Session& session, const std::string& username, const std::strin
 bool recv_verify_user_result(Session& session)
 {
 	char *packet = session.receive_packet();
+	PackHead *packhead;
+	uint32_t uiPackLength;
+	MsgPackData *msgpack;
+	UserVrfB *vrfResult;
+
 	if (!packet)
 	{
 		LOG_ERR("Failed to receive user verification result");
 		return false;
 	}
 
-	PackHead *packhead = (PackHead*) packet;
+	packhead = (PackHead*) packet;
 	if (packhead->cPackType != 0x00)
 	{
 		std::fprintf(stderr, "[ERROR] Packet type %02x is invalid\n", packhead->cPackType);
-		return false;
+		goto on_error;
 	}
 
-	uint32_t uiPackLength = ntohl(packhead->uiLength);
+	uiPackLength = ntohl(packhead->uiLength);
 	if (!check_packet_len(uiPackLength, sizeof(UserVrfB) + STRUCT_MEMBER_POS(MsgPackData, pMsg)))
 	{
 	    LOG_ERR("Packet size is invalid");
-	    return false;
+	    goto on_error;
 	}
 
-	unsigned char *pDatatmp = (unsigned char*)packet + STRUCT_MEMBER_POS(PackHead, pData);
-
-	MsgPackData *msgpack;
-	msgpack = (MsgPackData *)pDatatmp;
+	msgpack = (MsgPackData *)packhead->pData;
 	if (msgpack->cMsgType[0] != MSGT_USERVRF_B)
 	{
 		std::fprintf(stderr, "[ERROR] Message type %02x is invalid\n", msgpack->cMsgType[0]);
-		return false;
+		goto on_error;
 	}
 
-	pDatatmp += STRUCT_MEMBER_POS(MsgPackData, pMsg);
-	UserVrfB *vrfResult = (UserVrfB *)pDatatmp;
+	vrfResult = (UserVrfB *)msgpack->pMsg;
 	if (vrfResult->bVerify != 1)
 	{
 	    LOG_ERR("Username or password is invalid");
-	    return false;
+	    goto on_error;
 	}
 
+	delete[] packet;
 	return true;
+
+on_error:
+    delete[] packet;
+    return false;
 }
 
 bool check_packet_len(uint32_t uiPackLength, size_t expected_data_size)
@@ -99,22 +142,15 @@ bool check_packet_len(uint32_t uiPackLength, size_t expected_data_size)
 
 bool send_user_creds(Session& session, const std::string& username, const std::string& password)
 {
-    size_t packsize = STRUCT_MEMBER_POS(PackHead, pData) + STRUCT_MEMBER_POS(MsgPackData, pMsg) + sizeof(UserVrf);
+    int packsize = GET_PACKSIZE(STRUCT_MEMBER_POS(MsgPackData, pMsg) + sizeof(UserVrf));
     assert(packsize <= BUF_SIZE);
 
-    PackHead* packhead = (PackHead*) buffer;
+    PackHead* packhead;
     MsgPackData msg;
     UserVrf usr_creds;
-    struct timespec timetic;
 
-    packhead->cHeadChar = PACKHEAD_MAGIC;
-    clock_gettime(CLOCK_MONOTONIC, &timetic);
-    packhead->uiTicket = htonl(timetic.tv_sec + timetic.tv_nsec/1000);
-    packhead->cPackType = PT_MSGPACK;
-    packhead->uiLength = htonl(STRUCT_MEMBER_POS(PackHead, pData)
-                               - STRUCT_MEMBER_POS(PackHead, cPackType)
-                               + STRUCT_MEMBER_POS(MsgPackData, pMsg)
-                               + sizeof(UserVrf));
+    packhead = write_packhead(STRUCT_MEMBER_POS(MsgPackData, pMsg) + sizeof(UserVrf),
+                              PT_MSGPACK, buffer);
 
     memset(&msg, 0, sizeof(MsgPackData));
     msg.cMsgType[0] = MSGT_USERVRF;

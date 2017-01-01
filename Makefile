@@ -1,7 +1,7 @@
 .PHONY: all clean
 
 CXX=g++
-CXXFLAGS=-g -Wall -DDEBUG #-Wextra
+CXXFLAGS=-g -Wall -DDEBUG -Wextra
 LDFLAGS=-lboost_system
 
 BIN=bubble_client

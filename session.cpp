@@ -51,7 +51,7 @@ char* Session::receive_packet()
 	char buffer[STRUCT_MEMBER_POS(PackHead, pData)];
 
 	int nbytes = receive_til_full(buffer, sizeof(buffer));
-	if (nbytes < sizeof(buffer) || (unsigned char)buffer[0] != PACKHEAD_MAGIC)
+	if (nbytes <= 0 || (size_t)nbytes < sizeof(buffer) || (unsigned char)buffer[0] != PACKHEAD_MAGIC)
 	{
 		LOG_ERR("Packet header is corrupted");
 		return NULL;
@@ -67,7 +67,7 @@ char* Session::receive_packet()
 
 	memcpy(packet, buffer, sizeof(buffer));
 	nbytes = receive_til_full(recv_start, bytes_left);
-	if (nbytes != bytes_left)
+	if (nbytes < 0 || (size_t)nbytes != bytes_left)
 	{
 		LOG_ERR("Packet data is corrupted");
 		delete[] packet;
@@ -80,19 +80,20 @@ char* Session::receive_packet()
 int Session::receive_til_full(char *buffer, size_t size)
 {
     int nbytes = -1;
-    try
+    system::error_code ec;
+    printf("[INFO] Receiving %lu bytes\n", size);
+    nbytes = asio::read(mSocket, asio::buffer(buffer, size), ec);
+    printf("[INFO] Received %lu bytes\n", size);
+    if (ec)
     {
-        printf("[INFO] Receiving %lu bytes\n", size);
-        nbytes = asio::read(mSocket, asio::buffer(buffer, size));
-        printf("[INFO] Received %lu bytes\n", size);
-#ifdef DEBUG
-        LOG_BUFFER("[DEBUG] Received:", nbytes, buffer);
-        LOG_BUFFER_HEX("---", nbytes, buffer);
-#endif
+        std::fprintf(stderr, "[ERROR] Failed to receive data: %d\n", ec.value());
     }
-    catch (std::exception& e)
+    else
     {
-        LOG_ERR(e.what());
+#ifdef DEBUG
+    LOG_BUFFER("[DEBUG] Received:", nbytes, buffer);
+    LOG_BUFFER_HEX("---", nbytes, buffer);
+#endif
     }
     return nbytes;
 }

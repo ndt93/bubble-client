@@ -3,7 +3,7 @@
 
 #include <cstdio>
 
-inline void LOG_BUFFER_HEX(const char *msg, size_t nbytes, const char *buffer)
+inline void LOG_BUFFER_HEX(const char *msg, int nbytes, const char *buffer)
 {
 	std::printf("%s\n", msg);
 	for (int i = 0; i < nbytes; i++)
