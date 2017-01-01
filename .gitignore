@@ -1,0 +1,7 @@
+.project
+.cproject
+build
+.settings
+*.o
+*.d
+bubble_client
