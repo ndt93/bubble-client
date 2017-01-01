@@ -13,12 +13,12 @@ static char buffer[BUF_SIZE];
 
 int main()
 {
-    int nbytes;
+    int status;
     Session session(SERVER_IP, SERVER_PORT);
 
     session.send(BUBBLE_INIT_SESSION, sizeof(BUBBLE_INIT_SESSION) - 1);
-    nbytes = session.receive_til_full(buffer, INIT_HTTP_RESP_SIZE);
-    if (nbytes <= 0)
+    status = session.receive_til_full(buffer, INIT_HTTP_RESP_SIZE);
+    if (status <= 0)
     {
         LOG_ERR("Failed to initialize bubble session");
         return 1;
@@ -30,6 +30,14 @@ int main()
         return 1;
     }
     std::printf("[INFO] User is logged in\n");
+
+    status = open_stream(session, 0, 0);
+    if (status != 0)
+    {
+        LOG_ERR("Failed to open stream");
+        return 1;
+    }
+    std::printf("[INFO] Stream is opened\n");
 
     return 0;
 }
@@ -50,22 +58,32 @@ PackHead* write_packhead(uint data_size, char cPackType, char *buffer)
     return packhead;
 }
 
-int open_stream(uint channel, uint stream_id)
+int open_stream(Session& session, uint channel, uint stream_id)
 {
     PackHead *packhead;
     BubbleOpenStream openStreamPack;
     size_t packsize;
+    int nbytes;
 
     std::printf("Opening stream: channel=%ud stream_id=%ud\n", channel, stream_id);
 
-    packsize = STRUCT_MEMBER_POS(PackHead, pData) + sizeof(openStreamPack);
+    packsize = GET_PACKSIZE(sizeof(BubbleOpenStream));
     assert(packsize <= BUF_SIZE);
 
     packhead = write_packhead(sizeof(BubbleOpenStream), PT_OPENSTREAM, buffer);
 
+    memset(&openStreamPack, 0, sizeof(BubbleOpenStream));
     openStreamPack.uiChannel = channel;
     openStreamPack.uiStreamId = stream_id;
     openStreamPack.uiOpened = 1;
+    memcpy(packhead->pData, &openStreamPack, sizeof(BubbleOpenStream));
+
+    nbytes = session.send(buffer, packsize);
+    if (nbytes < 0 || (size_t)nbytes != packsize)
+    {
+        LOG_ERR("Failed to send open stream packet");
+        return 1;
+    }
 
     return 0;
 }

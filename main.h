@@ -14,6 +14,6 @@ bool send_user_creds(Session& session, const std::string& username, const std::s
 bool recv_verify_user_result(Session& session);
 bool check_packet_len(uint32_t uiPackLength, size_t expected_data_size);
 
-int open_stream(uint channel, uint stream_id);
+int open_stream(Session& session, uint channel, uint stream_id);
 
 #endif
