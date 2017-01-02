@@ -1,7 +1,54 @@
 #include "media.h"
+#include <cstdio>
 
-MediaSession::MediaSession(Session *session) : mpSession(session), isRunning(false)
+MediaSession::MediaSession(Session *session) :
+    mpSession(session), isRunning(false), mCodec(NULL), mCodecCtx(NULL), mAvFrame(NULL)
 {
+    avcodec_register_all();
+}
+
+MediaSession::~MediaSession()
+{
+    if (mCodecCtx)
+    {
+        avcodec_close(mCodecCtx);
+        av_free(mCodecCtx);
+    }
+    if (mAvFrame)
+    {
+        av_free(mAvFrame);
+    }
+}
+
+int MediaSession::init()
+{
+    std::printf("[INFO] Initializing media session...\n");
+    mCodec = avcodec_find_decoder(AV_CODEC_ID_H264);
+    if (!mCodec)
+    {
+        LOG_ERR("Codec not found");
+        return -1;
+    }
+
+    mCodecCtx = avcodec_alloc_context3(mCodec);
+    mAvFrame = av_frame_alloc();
+
+    if (avcodec_open2(mCodecCtx, mCodec, NULL) < 0)
+    {
+        LOG_ERR("Failed to open codec");
+        goto on_error;
+    }
+
+    av_init_packet(&mAvPkt);
+    std::printf("[INFO] Initialized media session\n");
+    return 0;
+on_error:
+    avcodec_close(mCodecCtx);
+    av_free(mCodecCtx);
+    av_free(mAvFrame);
+    mCodecCtx = NULL;
+    mAvFrame = NULL;
+    return -1;
 }
 
 int MediaSession::start()
@@ -9,6 +56,14 @@ int MediaSession::start()
     int status;
     PackHead *packhead;
 
+    status = init();
+    if (status != 0)
+    {
+        LOG_ERR("Failed to initialize media session");
+        return -1;
+    }
+
+    std::printf("[INFO] Receiving media frames\n");
     status = mpSession->receive_packet_to_buffer(tmpRecvBuf, sizeof(tmpRecvBuf));
     if (status != 0)
     {
@@ -22,12 +77,21 @@ int MediaSession::start()
     }
 
     isRunning = true;
-    std::printf("[INFO] Receiving media frames");
 
     while (isRunning)
     {
-        processPacket(tmpRecvBuf);
+        status = processPacket(tmpRecvBuf);
+        if (status != 0)
+        {
+            LOG_ERR("Failed to process media packet");
+            break;
+        }
         status = mpSession->receive_packet_to_buffer(tmpRecvBuf, sizeof(tmpRecvBuf));
+        if (status != 0)
+        {
+            LOG_ERR("Failed to receive media packet");
+            break;
+        }
     }
 
     return 0;
@@ -54,6 +118,7 @@ int MediaSession::processPacket(char *packet)
         return -1;
     }
 
+    std::printf("[INFO] Media packet chl: %d type: %d\n", media_packhead->cId, media_packhead->cMediaType);
     framedata = media_packhead->pData;
     return 0;
 }

@@ -1,8 +1,8 @@
 .PHONY: all clean
 
 CXX=g++
-CXXFLAGS=-g -Wall -DDEBUG -Wextra
-LDFLAGS=-lboost_system
+CXXFLAGS=-Wall -O3 -g -DDEBUG -Wextra
+LDFLAGS=-lboost_system -lavcodec
 
 BIN=bubble_client
 BUILD_DIR=./build

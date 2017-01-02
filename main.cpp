@@ -95,7 +95,7 @@ int open_stream(Session& session, uint channel, uint stream_id)
     size_t packsize;
     int nbytes;
 
-    std::printf("Opening stream: channel=%ud stream_id=%ud\n", channel, stream_id);
+    std::printf("[INFO] Opening stream: channel=%u stream_id=%u\n", channel, stream_id);
 
     packsize = GET_PACKSIZE(sizeof(BubbleOpenStream));
     assert(packsize <= BUF_SIZE);

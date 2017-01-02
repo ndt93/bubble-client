@@ -17,6 +17,14 @@ enum _enPackType {
     PT_CNT,
 };
 
+enum _enMediaType{
+    MT_AUDIO,
+    MT_IDR,
+    MT_PSLICE,
+
+    MT_CNT,
+};
+
 enum _enMsgType {
     MSGT_USERVRF = 0,
     MSGT_CHLREQ,
