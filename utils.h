@@ -1,5 +1,5 @@
-#ifndef UTILS_H_
-#define UTILS_H_
+#ifndef __UTILS_H__
+#define __UTILS_H__
 
 #include <cstdio>
 

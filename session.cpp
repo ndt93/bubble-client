@@ -5,12 +5,11 @@
 #include "bubble_def.h"
 #include "utils.h"
 
-asio::io_service ios;
-
-Session::Session(std::string server_ip, int server_port) : mSocket(ios)
+Session::Session(std::string server_ip, int server_port) : mSocket(mIOService)
 {
     try
     {
+        std::printf("[INFO] Connecting to %s:%d\n", server_ip.c_str(), server_port);
         asio::ip::tcp::endpoint endpoint(asio::ip::address::from_string(server_ip), server_port);
         mSocket.connect(endpoint);
         std::printf("[INFO] Connected to %s:%d\n", server_ip.c_str(), server_port);
@@ -83,10 +82,10 @@ int Session::receive_til_full(char *buffer, size_t size)
     system::error_code ec;
     printf("[INFO] Receiving %lu bytes\n", size);
     nbytes = asio::read(mSocket, asio::buffer(buffer, size), ec);
-    printf("[INFO] Received %lu bytes\n", size);
+    printf("[INFO] Received %d bytes\n", nbytes);
     if (ec)
     {
-        std::fprintf(stderr, "[ERROR] Failed to receive data: %d\n", ec.value());
+        std::fprintf(stderr, "[ERROR] Failed to receive data: %s\n", ec.message().c_str());
     }
     else
     {

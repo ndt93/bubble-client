@@ -1,12 +1,10 @@
-#ifndef __TRANSPORT__
-#define __TRANSPORT__
+#ifndef __SESSION__
+#define __SESSION__
 
 #include <string>
 #include <boost/asio.hpp>
 
 using namespace boost;
-
-extern asio::io_service ios;
 
 class Session {
 public:
@@ -18,6 +16,7 @@ public:
     int receive_at_least(char *buffer, size_t size, size_t at_least);
     char* receive_packet();
 private:
+    asio::io_service mIOService;
     asio::ip::tcp::socket mSocket;
 };
 

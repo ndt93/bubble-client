@@ -1,6 +1,7 @@
-#include "macro_def.h"
+#ifndef __BUBBLE_DEF__
+#define __BUBBLE_DEF__
 
-#pragma pack(1)
+#include "macro_def.h"
 
 #define PACKHEAD_MAGIC 0xaa
 
@@ -27,6 +28,8 @@ enum _enMsgType {
 
     MSGT_CNT,
 };
+
+#pragma pack(1)
 
 typedef struct _tagPackHead {
     char          cHeadChar;     // always be 0xaa
@@ -62,3 +65,13 @@ typedef struct _tagBubbleOpenStream{
     unsigned int uiReverse;
 } BubbleOpenStream;
 
+typedef struct _tagMediaPackData {
+    unsigned int  uiLength;      // length of pData, in network sequence
+    char          cMediaType;    // type of data, can be value of _enMediaType type
+    char          cId;           // channel number
+    char          pData[1];      // media data
+} MediaPackData;
+
+#pragma pack()
+
+#endif

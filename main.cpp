@@ -16,7 +16,12 @@ int main()
     int status;
     Session session(SERVER_IP, SERVER_PORT);
 
-    session.send(BUBBLE_INIT_SESSION, sizeof(BUBBLE_INIT_SESSION) - 1);
+    status = session.send(BUBBLE_INIT_SESSION, sizeof(BUBBLE_INIT_SESSION) - 1);
+    if (status < 0 || (size_t)status != sizeof(BUBBLE_INIT_SESSION) - 1)
+    {
+        LOG_ERR("Failed to send session init request");
+        return 1;
+    }
     status = session.receive_til_full(buffer, INIT_HTTP_RESP_SIZE);
     if (status <= 0)
     {
