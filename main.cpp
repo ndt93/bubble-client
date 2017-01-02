@@ -1,35 +1,31 @@
 #include "main.h"
 #include "time.h"
 #include "utils.h"
-
-#define BUF_SIZE (2 * 1024)
-#define INIT_HTTP_RESP_SIZE 1142
+#include "media.h"
 
 static std::string SERVER_IP = "192.168.1.112";
 static int SERVER_PORT = 80;
 
-static const char BUBBLE_INIT_SESSION[] = "GET /bubble/live?ch=0&stream=0 HTTP/1.1\r\n\r\n";
+static const std::string USERNAME = "admin";
+static const std::string PASSWD = "123";
+
+#define BUF_SIZE (2 * 1024)
 static char buffer[BUF_SIZE];
 
 int main()
 {
     int status;
     Session session(SERVER_IP, SERVER_PORT);
+    MediaSession media_session(&session);
 
-    status = session.send(BUBBLE_INIT_SESSION, sizeof(BUBBLE_INIT_SESSION) - 1);
-    if (status < 0 || (size_t)status != sizeof(BUBBLE_INIT_SESSION) - 1)
+    status = init_bubble_session(session);
+    if (status != 0)
     {
-        LOG_ERR("Failed to send session init request");
-        return 1;
+       return 1;
     }
-    status = session.receive_til_full(buffer, INIT_HTTP_RESP_SIZE);
-    if (status <= 0)
-    {
-        LOG_ERR("Failed to initialize bubble session");
-        return 1;
-    }
+    std::printf("[INFO] Bubble session initialized\n");
 
-    if (!verify_user(session, "admin", "123"))
+    if (!verify_user(session, USERNAME, PASSWD))
     {
         LOG_WARN("Username or password is invalid");
         return 1;
@@ -43,6 +39,8 @@ int main()
         return 1;
     }
     std::printf("[INFO] Stream is opened\n");
+
+    media_session.start();
 
     return 0;
 }
@@ -61,6 +59,33 @@ PackHead* write_packhead(uint data_size, char cPackType, char *buffer)
                                + data_size);
 
     return packhead;
+}
+
+bool check_packet_len(uint32_t uiPackLength, size_t expected_data_size)
+{
+	return uiPackLength == expected_data_size +
+	        (STRUCT_MEMBER_POS(PackHead, pData) - STRUCT_MEMBER_POS(PackHead, cPackType));
+}
+
+int init_bubble_session(Session& session)
+{
+    const char init_session_req[] = "GET /bubble/live?ch=0&stream=0 HTTP/1.1\r\n\r\n";
+    const size_t init_resp_size = 1142;
+    int nbytes;
+
+    nbytes = session.send(init_session_req, sizeof(init_session_req) - 1);
+    if (nbytes < 0 || (size_t)nbytes != sizeof(init_session_req) - 1)
+    {
+        LOG_ERR("Failed to send session init request");
+        return -1;
+    }
+    nbytes = session.receive_til_full(buffer, init_resp_size);
+    if (nbytes <= 0)
+    {
+        LOG_ERR("Failed to initialize bubble session");
+        return -1;
+    }
+    return 0;
 }
 
 int open_stream(Session& session, uint channel, uint stream_id)
@@ -87,7 +112,7 @@ int open_stream(Session& session, uint channel, uint stream_id)
     if (nbytes < 0 || (size_t)nbytes != packsize)
     {
         LOG_ERR("Failed to send open stream packet");
-        return 1;
+        return -1;
     }
 
     return 0;
@@ -155,12 +180,6 @@ bool recv_verify_user_result(Session& session)
 on_error:
     delete[] packet;
     return false;
-}
-
-bool check_packet_len(uint32_t uiPackLength, size_t expected_data_size)
-{
-	return uiPackLength == expected_data_size +
-	        (STRUCT_MEMBER_POS(PackHead, pData) - STRUCT_MEMBER_POS(PackHead, cPackType));
 }
 
 bool send_user_creds(Session& session, const std::string& username, const std::string& password)

@@ -3,8 +3,6 @@
 
 #include "macro_def.h"
 
-#define PACKHEAD_MAGIC 0xaa
-
 #define USER_AUTH_CNT       32
 #define MAX_USERNAME_LEN    (20)
 #define MAX_PASSWORD_LEN    (20)
@@ -39,6 +37,8 @@ typedef struct _tagPackHead {
     char          pData[1];      // package data ,can be MsgPackData or MediaPackData struct
 } PackHead;
 
+#define PACKHEAD_MAGIC (0xaa)
+#define PACKHEAD_SIZE STRUCT_MEMBER_POS(PackHead, pData)
 #define GET_PACKSIZE(data_size) (STRUCT_MEMBER_POS(PackHead, pData) + (data_size))
 
 typedef struct _tagMsgPackData {

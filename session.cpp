@@ -47,10 +47,10 @@ int Session::send(const char *data, size_t size)
 
 char* Session::receive_packet()
 {
-	char buffer[STRUCT_MEMBER_POS(PackHead, pData)];
+	char buffer[PACKHEAD_SIZE];
 
-	int nbytes = receive_til_full(buffer, sizeof(buffer));
-	if (nbytes <= 0 || (size_t)nbytes < sizeof(buffer) || (unsigned char)buffer[0] != PACKHEAD_MAGIC)
+	int nbytes = receive_til_full(buffer, PACKHEAD_SIZE);
+	if (nbytes <= 0 || (size_t)nbytes < PACKHEAD_SIZE || (unsigned char)buffer[0] != PACKHEAD_MAGIC)
 	{
 		LOG_ERR("Packet header is corrupted");
 		return NULL;
@@ -59,12 +59,17 @@ char* Session::receive_packet()
 	PackHead* packhead = (PackHead*) buffer;
 	uint32_t uiPackLength = ntohl(packhead->uiLength);
 	size_t packetSize = uiPackLength + STRUCT_MEMBER_POS(PackHead, cPackType);
-	assert(packetSize > sizeof(buffer));
-	char *packet = new char[packetSize];
-	size_t bytes_left = packetSize - sizeof(buffer);
-	char *recv_start = packet + sizeof(buffer);
+	if (packetSize < PACKHEAD_SIZE)
+	{
+		LOG_ERR("Packet length field is corrupted");
+		return NULL;
+	}
 
-	memcpy(packet, buffer, sizeof(buffer));
+	char *packet = new char[packetSize];
+	size_t bytes_left = packetSize - PACKHEAD_SIZE;
+	char *recv_start = packet + PACKHEAD_SIZE;
+
+	memcpy(packet, buffer, PACKHEAD_SIZE);
 	nbytes = receive_til_full(recv_start, bytes_left);
 	if (nbytes < 0 || (size_t)nbytes != bytes_left)
 	{
@@ -76,23 +81,64 @@ char* Session::receive_packet()
 	return packet;
 }
 
+int Session::receive_packet_to_buffer(char *buffer, size_t buffer_size)
+{
+    if (buffer_size < PACKHEAD_SIZE)
+    {
+        LOG_ERR("Receive buffer is too small");
+        return -1;
+    }
+
+	int nbytes = receive_til_full(buffer, PACKHEAD_SIZE);
+	if (nbytes <= 0 || (size_t)nbytes < PACKHEAD_SIZE || (unsigned char)buffer[0] != PACKHEAD_MAGIC)
+	{
+		LOG_ERR("Packet header is corrupted");
+		return -1;
+	}
+
+	PackHead* packhead = (PackHead*) buffer;
+	uint32_t uiPackLength = ntohl(packhead->uiLength);
+	size_t packetSize = uiPackLength + STRUCT_MEMBER_POS(PackHead, cPackType);
+	if (packetSize < PACKHEAD_SIZE)
+	{
+		LOG_ERR("Packet length field is corrupted");
+		return -1;
+	}
+	if (packetSize > buffer_size)
+	{
+        LOG_ERR("Receive buffer is too small");
+        return -1;
+	}
+
+	size_t bytes_left = packetSize - PACKHEAD_SIZE;
+	char *recv_start = buffer + PACKHEAD_SIZE;
+
+	nbytes = receive_til_full(recv_start, bytes_left);
+	if (nbytes < 0 || (size_t)nbytes != bytes_left)
+	{
+		LOG_ERR("Packet data is corrupted");
+		return -1;
+	}
+
+	return 0;
+}
+
 int Session::receive_til_full(char *buffer, size_t size)
 {
     int nbytes = -1;
-    system::error_code ec;
-    printf("[INFO] Receiving %lu bytes\n", size);
-    nbytes = asio::read(mSocket, asio::buffer(buffer, size), ec);
-    printf("[INFO] Received %d bytes\n", nbytes);
-    if (ec)
+    try
     {
-        std::fprintf(stderr, "[ERROR] Failed to receive data: %s\n", ec.message().c_str());
-    }
-    else
-    {
+        printf("[INFO] Receiving %lu bytes\n", size);
+        nbytes = asio::read(mSocket, asio::buffer(buffer, size));
+        printf("[INFO] Received %d bytes\n", nbytes);
 #ifdef DEBUG
-    LOG_BUFFER("[DEBUG] Received:", nbytes, buffer);
-    LOG_BUFFER_HEX("---", nbytes, buffer);
+        LOG_BUFFER("[DEBUG] Received:", nbytes, buffer);
+        LOG_BUFFER_HEX("---", nbytes, buffer);
 #endif
+    }
+    catch (std::exception& e)
+    {
+        LOG_ERR(e.what());
     }
     return nbytes;
 }
