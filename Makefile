@@ -1,8 +1,10 @@
 .PHONY: all clean
 
 CXX=g++
-CXXFLAGS=-Wall -O3 -g -DDEBUG -Wextra
-LDFLAGS=-lboost_system -lavcodec
+OPENCV_CPPFLAGS=-I/usr/local/opt/opencv3/include
+OPENCV_LDFLAGS=-L/usr/local/opt/opencv3/lib -lopencv_highgui -lopencv_core
+CXXFLAGS=-Wall -O3 -Wextra $(OPENCV_CPPFLAGS) #-g -DDEBUG
+LDFLAGS=-lboost_system -lavcodec -lswscale $(OPENCV_LDFLAGS)
 
 BIN=bubble_client
 BUILD_DIR=./build

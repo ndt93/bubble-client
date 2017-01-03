@@ -30,10 +30,12 @@ int Session::send(const char *data, size_t size)
     int nbytes = -1;
     try
     {
-        printf("[INFO] Sending %lu bytes\n", size);
-        nbytes = asio::write(mSocket, asio::buffer((void*) data, size));
-        printf("[INFO] Sent %d bytes\n", nbytes);
 #ifdef DEBUG
+        printf("[INFO] Sending %lu bytes\n", size);
+#endif
+        nbytes = asio::write(mSocket, asio::buffer((void*) data, size));
+#ifdef DEBUG
+        std::printf("[INFO] Sent %d bytes\n", nbytes);
         LOG_BUFFER("[DEBUG]Sent:", nbytes, data);
         LOG_BUFFER_HEX("---", nbytes, data);
 #endif
@@ -128,10 +130,12 @@ int Session::receive_til_full(char *buffer, size_t size)
     int nbytes = -1;
     try
     {
-        printf("[INFO] Receiving %lu bytes\n", size);
-        nbytes = asio::read(mSocket, asio::buffer(buffer, size));
-        printf("[INFO] Received %d bytes\n", nbytes);
 #ifdef DEBUG
+        printf("[INFO] Receiving %lu bytes\n", size);
+#endif
+        nbytes = asio::read(mSocket, asio::buffer(buffer, size));
+#ifdef DEBUG
+        printf("[INFO] Received %d bytes\n", nbytes);
         LOG_BUFFER("[DEBUG] Received:", nbytes, buffer);
         LOG_BUFFER_HEX("---", nbytes, buffer);
 #endif
@@ -149,10 +153,12 @@ int Session::receive_at_least(char *buffer, size_t size, size_t at_least)
     try
     {
         assert(at_least <= size);
-        printf("[INFO] Receiving at least %lu bytes\n", at_least);
-        nbytes = asio::read(mSocket, asio::buffer(buffer, size));
-        printf("[INFO] Received %d bytes\n", nbytes);
 #ifdef DEBUG
+        printf("[INFO] Receiving at least %lu bytes\n", at_least);
+#endif
+        nbytes = asio::read(mSocket, asio::buffer(buffer, size));
+#ifdef DEBUG
+        printf("[INFO] Received %d bytes\n", nbytes);
         LOG_BUFFER("[DEBUG] Received:", nbytes, buffer);
         LOG_BUFFER_HEX("---", nbytes, buffer);
 #endif

@@ -1,8 +1,12 @@
 #include "media.h"
 #include <cstdio>
 
+#include <opencv2/highgui.hpp>
+
 MediaSession::MediaSession(Session *session) :
-    mpSession(session), isRunning(false), mCodec(NULL), mCodecCtx(NULL), mAvFrame(NULL)
+    mpSession(session), isRunning(false),
+    mCodec(NULL), mCodecCtx(NULL), mAvFrame(NULL),
+    mSwsCtx(NULL), mRGBFrame(NULL), mRGBFrameBuffer(NULL)
 {
     avcodec_register_all();
 }
@@ -17,6 +21,19 @@ MediaSession::~MediaSession()
     if (mAvFrame)
     {
         av_free(mAvFrame);
+    }
+
+    if (mSwsCtx)
+    {
+        sws_freeContext(mSwsCtx);
+    }
+    if (mRGBFrame)
+    {
+        av_free(mRGBFrame);
+    }
+    if (mRGBFrameBuffer)
+    {
+        free(mRGBFrameBuffer);
     }
 }
 
@@ -88,8 +105,6 @@ int MediaSession::start()
             break;
         }
 
-        usleep(1000);
-
         status = mpSession->receive_packet_to_buffer(tmpRecvBuf, sizeof(tmpRecvBuf));
         if (status != 0)
         {
@@ -122,7 +137,9 @@ int MediaSession::processPacket(char *packet)
         return -1;
     }
 
+#ifdef DEBUG
     std::printf("[INFO] Media packet chl: %d type: %d\n", media_packhead->cId, media_packhead->cMediaType);
+#endif
     framedata = media_packhead->pData;
     switch (media_packhead->cMediaType)
     {
@@ -163,11 +180,82 @@ int MediaSession::decodeFrame(char *buffer, int size)
         if (status != 0)
         {
             LOG_ERR("Error decoding frame");
-            exit(0);
-            break;
+            return -1;
         }
+#ifdef DEBUG
         std::printf("[INFO] Frame decoded w: %d h: %d!!!\n", mCodecCtx->width, mCodecCtx->height);
+#endif
+        displayFrame(mAvFrame, mCodecCtx->width, mCodecCtx->height);
     }
+
+    return 0;
+}
+
+int MediaSession::allocateConversionCtx(enum AVPixelFormat pix_fmt, int width, int height)
+{
+    if (mSwsCtx)
+    {
+        return 0;
+    }
+    assert(mRGBFrame == NULL && mRGBFrameBuffer == NULL);
+
+    mSwsCtx = sws_getContext(width, height, pix_fmt, width, height,
+                             AV_PIX_FMT_BGR24, SWS_BICUBIC, NULL, NULL, NULL);
+    if (!mSwsCtx)
+    {
+        LOG_ERR("Failed to allocate sws context");
+        return -1;
+    }
+
+    mRGBFrame = av_frame_alloc();
+    if (!mRGBFrame)
+    {
+        LOG_ERR("Failed to allocate RGB frame");
+        sws_freeContext(mSwsCtx);
+        mSwsCtx = NULL;
+        return -1;
+    }
+    mRGBFrame->width = width;
+    mRGBFrame->height = height;
+    mRGBFrame->format = AV_PIX_FMT_BGR24;
+
+    int nbytes = av_image_get_buffer_size(AV_PIX_FMT_BGR24, width, height, 1);
+    mRGBFrameBuffer = (uint8_t *)av_malloc(nbytes);
+    if (!mRGBFrameBuffer)
+    {
+        LOG_ERR("Failed to allocate RGB frame buffer");
+        sws_freeContext(mSwsCtx);
+        av_free(mRGBFrame);
+        mSwsCtx = NULL;
+        mRGBFrame = NULL;
+        return -1;
+    }
+    av_image_fill_arrays(mRGBFrame->data, mRGBFrame->linesize, mRGBFrameBuffer,
+                         AV_PIX_FMT_BGR24, width, height, 1);
+    return 0;
+}
+
+int MediaSession::displayFrame(AVFrame *frame, int width, int height)
+{
+    int status;
+    status = allocateConversionCtx(mCodecCtx->pix_fmt, width, height);
+    if (status < 0)
+    {
+        LOG_ERR("Failed to allocate conversion resource");
+        return -1;
+    }
+
+    status = sws_scale(mSwsCtx, frame->data, frame->linesize, 0, height, mRGBFrame->data, mRGBFrame->linesize);
+    if (status < 0)
+    {
+        LOG_ERR("Failed to scale frame");
+        return -1;
+    }
+
+    cv::Mat mat(height, width, CV_8UC3,  mRGBFrame->data[0], mRGBFrame->linesize[0]);
+    cv::namedWindow("Stream");
+    cv::imshow("Stream", mat);
+    cv::waitKey(10);
 
     return 0;
 }
