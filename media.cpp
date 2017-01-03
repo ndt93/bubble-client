@@ -42,6 +42,7 @@ int MediaSession::init()
     av_init_packet(&mAvPkt);
     std::printf("[INFO] Initialized media session\n");
     return 0;
+
 on_error:
     avcodec_close(mCodecCtx);
     av_free(mCodecCtx);
@@ -86,6 +87,9 @@ int MediaSession::start()
             LOG_ERR("Failed to process media packet");
             break;
         }
+
+        usleep(1000);
+
         status = mpSession->receive_packet_to_buffer(tmpRecvBuf, sizeof(tmpRecvBuf));
         if (status != 0)
         {
@@ -120,5 +124,50 @@ int MediaSession::processPacket(char *packet)
 
     std::printf("[INFO] Media packet chl: %d type: %d\n", media_packhead->cId, media_packhead->cMediaType);
     framedata = media_packhead->pData;
+    switch (media_packhead->cMediaType)
+    {
+    case MT_IDR:
+    case MT_PSLICE:
+        decodeFrame(framedata, uiMediaPackLen);
+        break;
+    case MT_AUDIO:
+        break;
+    default:
+        LOG_ERR("Unknown media pack type");
+    }
+
+    return 0;
+}
+
+
+int MediaSession::decodeFrame(char *buffer, int size)
+{
+    int status;
+    mAvPkt.size = size;
+    mAvPkt.data = (uint8_t *)buffer;
+
+    status = avcodec_send_packet(mCodecCtx, &mAvPkt);
+    if (status != 0)
+    {
+        std::fprintf(stderr, "[ERROR] avcodec_send_packet: %d\n", status);
+        return -1;
+    }
+
+    while (true)
+    {
+        status = avcodec_receive_frame(mCodecCtx, mAvFrame);
+        if (status == AVERROR(EAGAIN) || status == AVERROR_EOF)
+        {
+            break;
+        }
+        if (status != 0)
+        {
+            LOG_ERR("Error decoding frame");
+            exit(0);
+            break;
+        }
+        std::printf("[INFO] Frame decoded w: %d h: %d!!!\n", mCodecCtx->width, mCodecCtx->height);
+    }
+
     return 0;
 }

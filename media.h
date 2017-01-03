@@ -19,7 +19,7 @@ public:
 private:
     Session *mpSession;
     bool isRunning;
-    char tmpRecvBuf[128*1024];
+    char tmpRecvBuf[128*1024 + FF_INPUT_BUFFER_PADDING_SIZE];
 
     AVCodec *mCodec;
     AVCodecContext *mCodecCtx;
@@ -28,6 +28,7 @@ private:
 
     int init();
     int processPacket(char *packet);
+    int decodeFrame(char *buffer, int size);
 };
 
 #endif
