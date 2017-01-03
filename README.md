@@ -6,9 +6,9 @@ The protocol is reverse engineered through packets capturing and from a non-offi
 
 ## Dependencies
 
-* C++ Boost 1.63.0 (Boost Asio in particular)
-* FFMPEG 3.2.2
-* OpenCV 3 (This is used for an example processing application and can be optionally removed by removing related code portions and flags in `Makefile`)
+* *C++ Boost 1.63.0* (Boost Asio in particular)
+* *FFMPEG 3.2.2*
+* *OpenCV 3* (This is used for an example processing application and can be optionally removed by removing the `Processor` class and OpenCV compilation flags in `Makefile`)
 
 ## Compilation
 
@@ -24,4 +24,4 @@ In the source code directory, run:
 
 > ./build/bubble\_client server\_ip server\_port username password
 
-***server_port*** is typically 80.
+*server_port* is typically 80.

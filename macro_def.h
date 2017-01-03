@@ -1,6 +1,8 @@
 #ifndef __MACRO_DEF__
 #define __MACRO_DEF__
 
+#include <cstdio>
+
 #define STRUCT_MEMBER_POS(t,m)  ((unsigned long)(&(((t *)(0))->m)))
 
 #define LOG_ERR(msg) (std::fprintf(stderr, "[ERROR] %s\n", (msg)))

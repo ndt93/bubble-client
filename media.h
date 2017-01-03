@@ -5,11 +5,10 @@
 #include "bubble_def.h"
 #include "macro_def.h"
 #include "util.h"
+#include "processor.h"
+
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libswscale/swscale.h>
-#include <libavutil/pixfmt.h>
-#include <libavutil/imgutils.h>
 }
 
 class MediaSession
@@ -29,15 +28,11 @@ private:
     AVPacket mAvPkt;
     AVFrame *mAvFrame;
 
-    struct SwsContext *mSwsCtx;
-    AVFrame *mRGBFrame;
-    uint8_t *mRGBFrameBuffer;
+    Processor processor;
 
     int init();
     int processPacket(char *packet);
     int decodeFrame(char *buffer, int size);
-    int allocateConversionCtx(enum AVPixelFormat pix_fmt, int width, int height);
-    int displayFrame(AVFrame *frame, int width, int height);
 };
 
 #endif
