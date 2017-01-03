@@ -3,19 +3,24 @@
 #include "utils.h"
 #include "media.h"
 
-static std::string SERVER_IP = "192.168.1.112";
-static int SERVER_PORT = 80;
-
-static const std::string USERNAME = "admin";
-static const std::string PASSWD = "123";
+static const std::string USAGE = "Usage: ./bubble_client server_ip server_port username password";
 
 #define BUF_SIZE (2 * 1024)
 static char buffer[BUF_SIZE];
 
-int main()
+int main(int argc, char *argv[])
 {
+    if (argc != 5)
+    {
+        std::printf("%s\n", USAGE.c_str());
+        return 1;
+    }
+    const std::string server_ip(argv[1]);
+    const int server_port = atoi(argv[2]);
+    const std::string username(argv[3]);
+    const std::string password(argv[4]);
     int status;
-    Session session(SERVER_IP, SERVER_PORT);
+    Session session(server_ip, server_port);
     MediaSession media_session(&session);
 
     status = init_bubble_session(session);
@@ -25,7 +30,7 @@ int main()
     }
     std::printf("[INFO] Bubble session initialized\n");
 
-    if (!verify_user(session, USERNAME, PASSWD))
+    if (!verify_user(session, username, password))
     {
         LOG_WARN("Username or password is invalid");
         return 1;
