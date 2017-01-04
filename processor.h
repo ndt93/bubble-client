@@ -7,6 +7,7 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/imgutils.h>
 }
+#include <opencv2/video/background_segm.hpp>
 
 class Processor
 {
@@ -18,8 +19,15 @@ private:
     struct SwsContext *mSwsCtx;
     AVFrame *mRGBFrame;
     uint8_t *mRGBFrameBuffer;
+    const double mAreaThreshold;
+
+    cv::Ptr<cv::BackgroundSubtractor> mpMOG;
+    cv::Mat mFgMaskMOG;
+    cv::Mat mMorphOpenKernel;
 
     int allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int width, int height);
+    void findForegroundObjects(cv::Mat& mat);
+    void displayFrame(cv::Mat& mat);
 };
 
 #endif

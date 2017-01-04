@@ -1,6 +1,9 @@
 #include "media.h"
 #include <cstdio>
 
+//static clock_t session_start;
+//static uint framecount;
+
 MediaSession::MediaSession(Session *session) :
     mpSession(session), isRunning(false), mCodec(NULL), mCodecCtx(NULL), mAvFrame(NULL)
 {
@@ -78,6 +81,8 @@ int MediaSession::start()
     }
 
     isRunning = true;
+    //session_start = clock();
+    //framecount = 0;
 
     while (isRunning)
     {
@@ -129,6 +134,8 @@ int MediaSession::processPacket(char *packet)
     case MT_IDR:
     case MT_PSLICE:
         decodeFrame(framedata, uiMediaPackLen);
+        //framecount++;
+        //std::printf("[FPS] %.3lf\n", framecount / ((double)(clock() - session_start)/CLOCKS_PER_SEC));
         break;
     case MT_AUDIO:
         break;
