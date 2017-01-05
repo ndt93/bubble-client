@@ -3,7 +3,7 @@
 #include "utils.h"
 #include "media.h"
 
-static const std::string USAGE = "Usage: ./bubble_client server_ip server_port username password";
+static const std::string USAGE = "Usage: bubble_client server_ip server_port username password";
 
 #define BUF_SIZE (2 * 1024)
 static char buffer[BUF_SIZE];

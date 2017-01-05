@@ -6,6 +6,7 @@
 #include "macro_def.h"
 #include "util.h"
 #include "processor.h"
+#include "publisher.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -28,6 +29,7 @@ private:
     AVPacket mAvPkt;
     AVFrame *mAvFrame;
 
+    Publisher publisher;
     Processor processor;
 
     int init();

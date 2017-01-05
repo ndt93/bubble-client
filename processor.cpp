@@ -8,7 +8,7 @@
 Processor::Processor() : mSwsCtx(NULL), mRGBFrame(NULL), mRGBFrameBuffer(NULL), mAreaThreshold(150)
 {
     cv::namedWindow("Stream");
-    cv::namedWindow("Fg");
+    //cv::namedWindow("Fg");
     mpMOG = cv::createBackgroundSubtractorMOG2(500, 16, false);
     mMorphOpenKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(2, 2));
 }
@@ -37,7 +37,7 @@ int Processor::process(AVFrame *frame)
     int dest_width = width / 2;
     int dest_height = height / 2;
 
-    status = allocateConversionCtx((enum AVPixelFormat)frame->format, width, height);
+    status = allocateConversionCtx((enum AVPixelFormat)frame->format, width, height, dest_width, dest_height);
     if (status < 0)
     {
         LOG_ERR("Failed to allocate conversion resource");
@@ -87,11 +87,11 @@ void Processor::findForegroundObjects(cv::Mat& mat)
 void Processor::displayFrame(cv::Mat& mat)
 {
     cv::imshow("Stream", mat);
-    cv::imshow("Fg", mFgMaskMOG);
-    cv::waitKey(10);
+    //cv::imshow("Fg", mFgMaskMOG);
+    cv::waitKey(1);
 }
 
-int Processor::allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int width, int height)
+int Processor::allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int src_w, int src_h, int dst_w, int dst_h)
 {
     if (mSwsCtx)
     {
@@ -99,9 +99,7 @@ int Processor::allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int width, 
     }
     assert(mRGBFrame == NULL && mRGBFrameBuffer == NULL);
 
-    int dest_width = width / 2;
-    int dest_height = height / 2;
-    mSwsCtx = sws_getContext(width, height, src_pix_fmt, dest_width, dest_height,
+    mSwsCtx = sws_getContext(src_w, src_h, src_pix_fmt, dst_w, dst_h,
                              AV_PIX_FMT_BGR24, SWS_BICUBIC, NULL, NULL, NULL);
     if (!mSwsCtx)
     {
@@ -117,11 +115,11 @@ int Processor::allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int width, 
         mSwsCtx = NULL;
         return -1;
     }
-    mRGBFrame->width = dest_width;
-    mRGBFrame->height = dest_height;
+    mRGBFrame->width = dst_w;
+    mRGBFrame->height = dst_h;
     mRGBFrame->format = AV_PIX_FMT_BGR24;
 
-    int nbytes = av_image_get_buffer_size(AV_PIX_FMT_BGR24, dest_width, dest_height, 1);
+    int nbytes = av_image_get_buffer_size(AV_PIX_FMT_BGR24, dst_w, dst_h, 1);
     mRGBFrameBuffer = (uint8_t *)av_malloc(nbytes);
     if (!mRGBFrameBuffer)
     {
@@ -133,6 +131,6 @@ int Processor::allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int width, 
         return -1;
     }
     av_image_fill_arrays(mRGBFrame->data, mRGBFrame->linesize, mRGBFrameBuffer,
-                         AV_PIX_FMT_BGR24, dest_width, dest_height, 1);
+                         AV_PIX_FMT_BGR24, dst_w, dst_h, 1);
     return 0;
 }

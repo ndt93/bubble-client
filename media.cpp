@@ -2,7 +2,7 @@
 #include <cstdio>
 
 //static clock_t session_start;
-//static uint framecount;
+//static uint framecount = 0;
 
 MediaSession::MediaSession(Session *session) :
     mpSession(session), isRunning(false), mCodec(NULL), mCodecCtx(NULL), mAvFrame(NULL)
@@ -81,8 +81,6 @@ int MediaSession::start()
     }
 
     isRunning = true;
-    //session_start = clock();
-    //framecount = 0;
 
     while (isRunning)
     {
@@ -112,6 +110,7 @@ int MediaSession::processPacket(char *packet)
     MediaPackData *media_packhead;
     uint32_t uiMediaPackLen;
     char *framedata;
+    int status;
 
     packhead = (PackHead *)packet;
     uiPackLen = ntohl(packhead->uiLength);
@@ -133,9 +132,23 @@ int MediaSession::processPacket(char *packet)
     {
     case MT_IDR:
     case MT_PSLICE:
-        decodeFrame(framedata, uiMediaPackLen);
-        //framecount++;
-        //std::printf("[FPS] %.3lf\n", framecount / ((double)(clock() - session_start)/CLOCKS_PER_SEC));
+    {
+        status = decodeFrame(framedata, uiMediaPackLen);
+        if (!publisher.isInitialized && status == 0)
+        {
+            status = publisher.init("out", mCodecCtx);
+            if (status != 0)
+            {
+                LOG_ERR("Failed to initialize publisher");
+            }
+        }
+        /*framecount++;
+        if (framecount == 0) {
+            session_start = clock();
+        } else {
+            std::printf("[FPS] %.3lf\n", framecount / ((double)(clock() - session_start)/CLOCKS_PER_SEC));
+        }*/
+    }
         break;
     case MT_AUDIO:
         break;

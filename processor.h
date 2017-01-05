@@ -25,7 +25,7 @@ private:
     cv::Mat mFgMaskMOG;
     cv::Mat mMorphOpenKernel;
 
-    int allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int width, int height);
+    int allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int src_w, int src_h, int dst_w, int dst_h);
     void findForegroundObjects(cv::Mat& mat);
     void displayFrame(cv::Mat& mat);
 };
