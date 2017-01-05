@@ -12,6 +12,10 @@ MediaSession::MediaSession(Session *session) :
 
 MediaSession::~MediaSession()
 {
+    if (publisher.isStarted)
+    {
+        publisher.stop();
+    }
     if (mCodecCtx)
     {
         avcodec_close(mCodecCtx);
@@ -136,10 +140,14 @@ int MediaSession::processPacket(char *packet)
         status = decodeFrame(framedata, uiMediaPackLen);
         if (!publisher.isInitialized && status == 0)
         {
-            status = publisher.init("out", mCodecCtx);
+            status = publisher.init("out.mp4", mCodecCtx);
             if (status != 0)
             {
                 LOG_ERR("Failed to initialize publisher");
+            }
+            else
+            {
+                publisher.start();
             }
         }
         /*framecount++;
@@ -165,6 +173,11 @@ int MediaSession::decodeFrame(char *buffer, int size)
     int status;
     mAvPkt.size = size;
     mAvPkt.data = (uint8_t *)buffer;
+
+    if (publisher.isStarted)
+    {
+        publisher.pushPacket(&mAvPkt);
+    }
 
     status = avcodec_send_packet(mCodecCtx, &mAvPkt);
     if (status != 0)
