@@ -7,6 +7,7 @@
 #include "util.h"
 #include "processor.h"
 #include "publisher.h"
+#include <boost/atomic.hpp>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -19,9 +20,9 @@ public:
     ~MediaSession();
 
     int start();
+    boost::atomic<bool> isRunning;
 private:
     Session *mpSession;
-    bool isRunning;
     char tmpRecvBuf[128*1024 + FF_INPUT_BUFFER_PADDING_SIZE];
 
     AVCodec *mCodec;

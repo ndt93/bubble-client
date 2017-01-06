@@ -11,6 +11,7 @@ class ConcurrentQueue
 private:
     std::queue<Data> mQueue;
     size_t mMaxSize;
+    bool mIsReleased;
     mutable boost::mutex mMutex;
     boost::condition_variable mConsumerNotifier;
     boost::condition_variable mProducerNotifier;
@@ -19,6 +20,18 @@ public:
     ConcurrentQueue(size_t max_size=100)
     {
         mMaxSize = max_size;
+        mIsReleased = false;
+    }
+
+    /* Release all threads waiting without any data guarantee.
+     * Should only be used when the queue is no longer used */
+    void release()
+    {
+        boost::mutex::scoped_lock lock(mMutex);
+        mIsReleased = true;
+        lock.unlock();
+        mConsumerNotifier.notify_all();
+        mProducerNotifier.notify_all();
     }
 
     bool tryPush(Data const& data)
@@ -35,16 +48,22 @@ public:
         return false;
     }
 
-    void waitAndPush(Data const& data)
+    int waitAndPush(Data const& data)
     {
         boost::mutex::scoped_lock lock(mMutex);
-        while (mMaxSize > 0 && mQueue.size() >= mMaxSize)
+        while (!mIsReleased && mMaxSize > 0 && mQueue.size() >= mMaxSize)
         {
             mProducerNotifier.wait(lock);
+        }
+
+        if (mIsReleased)
+        {
+            return -1;
         }
         mQueue.push(data);
         lock.unlock();
         mConsumerNotifier.notify_one();
+        return 0;
     }
 
     bool empty() const
@@ -67,25 +86,30 @@ public:
             return false;
         }
 
-        popped_value=mQueue.front();
+        popped_value = mQueue.front();
         mQueue.pop();
         lock.unlock();
         mProducerNotifier.notify_one();
         return true;
     }
 
-    void waitAndPop(Data& popped_value)
+    int waitAndPop(Data& popped_value)
     {
         boost::mutex::scoped_lock lock(mMutex);
-        while(mQueue.empty())
+        while(!mIsReleased && mQueue.empty())
         {
             mConsumerNotifier.wait(lock);
         }
 
-        popped_value=mQueue.front();
+        if (mIsReleased)
+        {
+            return -1;
+        }
+        popped_value = mQueue.front();
         lock.unlock();
         mProducerNotifier.notify_one();
         mQueue.pop();
+        return 0;
     }
 };
 

@@ -24,6 +24,7 @@ Publisher::Publisher(int queue_size) :
 
 Publisher::~Publisher()
 {
+    std::printf("[INFO] Closing publisher...\n");
     if (isStarted)
     {
         stop();
@@ -35,12 +36,13 @@ Publisher::~Publisher()
 
     if (mOutFmtCtx)
     {
-        avformat_free_context(mOutFmtCtx);
         if (!(mOutFmtCtx->flags & AVFMT_NOFILE))
         {
             avio_close(mOutFmtCtx->pb);
         }
+        avformat_free_context(mOutFmtCtx);
     }
+    std::printf("[INFO] Publisher closed\n");
 }
 
 int Publisher::start()
@@ -62,13 +64,7 @@ void Publisher::publish()
 {
     std::printf("[INFO] Publishing thread has started\n");
     AVFrame *video_frame;
-    AVPacket video_pkt, audio_pkt;
     int status;
-
-    memset(&video_pkt, 0, sizeof(AVPacket));
-    av_init_packet(&video_pkt);
-    memset(&audio_pkt, 0, sizeof(AVPacket));
-    av_init_packet(&audio_pkt);
 
     mVideoOutStream.next_pts = 0;
 
@@ -77,50 +73,83 @@ void Publisher::publish()
         if (av_compare_ts(mVideoOutStream.next_pts, mVideoOutStream.enc->time_base,
                           mAudioOutStream.next_pts, mAudioOutStream.enc->time_base) <= 0)
         {
-            mFramesQueue.waitAndPop(video_frame);
-            encodeVideoFrame(&mVideoOutStream, video_frame);
-            status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
-            while (status == 0)
+            status = mFramesQueue.waitAndPop(video_frame);
+            if (status != 0)
             {
-#ifdef DEBUG
-                std::printf("[DEBUG] Publishing %d bytes packet @%p\n", video_pkt.size, video_pkt.data);
-#endif
-                av_packet_rescale_ts(&video_pkt, (AVRational){1, STREAM_FRAME_RATE} , mVideoOutStream.st->time_base);
-                video_pkt.stream_index = mVideoOutStream.st->index;
-                video_pkt.pos = -1;
-#ifdef DEBUG
-                std::printf("[DEBUG] %lld %lld %lld\n", video_pkt.pts, video_pkt.dts, video_pkt.duration);
-                std::printf("[DEBUG] Send %8d video frames to output URL\n", mVideoOutStream.next_pts);
-#endif
-                status = av_interleaved_write_frame(mOutFmtCtx, &video_pkt);
-                if (status < 0) {
-                    LOG_ERR("Publisher: Error muxing video packet");
-                }
-                status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
+                continue;
             }
+            encodeVideoFrame(&mVideoOutStream, video_frame);
+            publishVideoPackets();
             mVideoOutStream.next_pts++;
-            av_packet_unref(&video_pkt);
             av_frame_free(&video_frame);
         }
         else
         {
             encodeAudioFrame(&mAudioOutStream);
-            status = avcodec_receive_packet(mAudioOutStream.enc, &audio_pkt);
-            while (status == 0)
-            {
-                av_packet_rescale_ts(&audio_pkt, mAudioOutStream.enc->time_base, mAudioOutStream.st->time_base);
-                audio_pkt.stream_index = mAudioOutStream.st->index;
-#ifdef DEBUG
-                log_packet(mOutFmtCtx, &audio_pkt);
-#endif
-                status = av_interleaved_write_frame(mOutFmtCtx, &audio_pkt);
-                if (status < 0) {
-                    LOG_ERR("Publisher: Error muxing audio packet");
-                }
-                status = avcodec_receive_packet(mAudioOutStream.enc, &audio_pkt);
-            }
-            av_packet_unref(&audio_pkt);
+            publishAudioPackets();
         }
+    }
+
+    std::printf("[INFO] Publisher: flushing packets\n");
+    avcodec_send_frame(mVideoOutStream.enc, NULL);
+    publishVideoPackets();
+
+    avcodec_send_frame(mAudioOutStream.enc, NULL);
+    publishAudioPackets();
+}
+
+void Publisher::publishVideoPackets()
+{
+    AVPacket video_pkt;
+    int status;
+
+    memset(&video_pkt, 0, sizeof(AVPacket));
+    av_init_packet(&video_pkt);
+
+    status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
+    while (status == 0)
+    {
+#ifdef DEBUG
+        std::printf("[DEBUG] Publishing %d bytes packet @%p\n", video_pkt.size, video_pkt.data);
+#endif
+        av_packet_rescale_ts(&video_pkt, (AVRational){1, STREAM_FRAME_RATE} , mVideoOutStream.st->time_base);
+        video_pkt.stream_index = mVideoOutStream.st->index;
+        video_pkt.pos = -1;
+#ifdef DEBUG
+        std::printf("[DEBUG] %lld %lld %lld\n", video_pkt.pts, video_pkt.dts, video_pkt.duration);
+        std::printf("[DEBUG] Send %8d video frames to output URL\n", mVideoOutStream.next_pts);
+#endif
+        status = av_interleaved_write_frame(mOutFmtCtx, &video_pkt);
+        if (status < 0) {
+            LOG_ERR("Publisher: Error muxing video packet");
+        }
+        av_packet_unref(&video_pkt);
+        status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
+    }
+}
+
+void Publisher::publishAudioPackets()
+{
+    int status;
+    AVPacket audio_pkt;
+
+    memset(&audio_pkt, 0, sizeof(AVPacket));
+    av_init_packet(&audio_pkt);
+
+    status = avcodec_receive_packet(mAudioOutStream.enc, &audio_pkt);
+    while (status == 0)
+    {
+        av_packet_rescale_ts(&audio_pkt, mAudioOutStream.enc->time_base, mAudioOutStream.st->time_base);
+        audio_pkt.stream_index = mAudioOutStream.st->index;
+#ifdef DEBUG
+        log_packet(mOutFmtCtx, &audio_pkt);
+#endif
+        status = av_interleaved_write_frame(mOutFmtCtx, &audio_pkt);
+        if (status < 0) {
+            LOG_ERR("Publisher: Error muxing audio packet");
+        }
+        av_packet_unref(&audio_pkt);
+        status = avcodec_receive_packet(mAudioOutStream.enc, &audio_pkt);
     }
 }
 
@@ -132,7 +161,9 @@ int Publisher::stop()
         return 0;
     }
 
+    std::printf("[INFO] Publisher: Stopping publishing thread...\n");
     isStarted = false;
+    mFramesQueue.release();
 
     if (mPublishingThread)
     {
@@ -141,6 +172,7 @@ int Publisher::stop()
         mPublishingThread = NULL;
     }
 
+    std::printf("[INFO] Publisher: publishing thread stopped\n");
     return 0;
 }
 

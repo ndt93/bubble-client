@@ -5,13 +5,14 @@
 //static uint framecount = 0;
 
 MediaSession::MediaSession(Session *session) :
-    mpSession(session), isRunning(false), mCodec(NULL), mCodecCtx(NULL), mAvFrame(NULL)
+    isRunning(false), mpSession(session), mCodec(NULL), mCodecCtx(NULL), mAvFrame(NULL)
 {
     avcodec_register_all();
 }
 
 MediaSession::~MediaSession()
 {
+    std::printf("[INFO] Closing media session\n");
     if (publisher.isStarted)
     {
         publisher.stop();
@@ -25,6 +26,7 @@ MediaSession::~MediaSession()
     {
         av_frame_free(&mAvFrame);
     }
+    std::printf("[INFO] Media session closed\n");
 }
 
 int MediaSession::init()

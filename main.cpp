@@ -8,6 +8,8 @@ static const std::string USAGE = "Usage: bubble_client server_ip server_port use
 #define BUF_SIZE (2 * 1024)
 static char buffer[BUF_SIZE];
 
+static MediaSession *p_media_session = NULL;
+
 int main(int argc, char *argv[])
 {
     if (argc != 5)
@@ -21,7 +23,6 @@ int main(int argc, char *argv[])
     const std::string password(argv[4]);
     int status;
     Session session(server_ip, server_port);
-    MediaSession media_session(&session);
 
     status = init_bubble_session(session);
     if (status != 0)
@@ -45,9 +46,26 @@ int main(int argc, char *argv[])
     }
     std::printf("[INFO] Stream is opened\n");
 
-    media_session.start();
+    start_media_session(session);
 
     return 0;
+}
+
+void start_media_session(Session& session)
+{
+    MediaSession media_session(&session);
+
+    signal(SIGINT, signal_handler);
+
+    p_media_session = &media_session;
+    media_session.start();
+    p_media_session = NULL;
+}
+
+void signal_handler(int)
+{
+    std::printf("[INFO] Received interrupt!\n");
+    p_media_session->isRunning = false;
 }
 
 PackHead* write_packhead(uint data_size, char cPackType, char *buffer)

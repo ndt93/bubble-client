@@ -51,6 +51,8 @@ private:
     int allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int src_w, int src_h, int dst_w, int dst_h);
     int encodeVideoFrame(OutputStream *ost, AVFrame *frame);
     void publish();
+    void publishVideoPackets();
+    void publishAudioPackets();
 
     // Sample a dummy audio packet. TODO: Replace with real audio from the camera
     OutputStream mAudioOutStream;

@@ -17,5 +17,8 @@ bool send_user_creds(Session& session, const std::string& username, const std::s
 bool recv_verify_user_result(Session& session);
 
 int open_stream(Session& session, uint channel, uint stream_id);
+ // Hack to get destructors invoked when program is interrupted
+void start_media_session(Session& session);
+void signal_handler(int);
 
 #endif
