@@ -185,6 +185,8 @@ int MediaSession::decodeFrame(char *buffer, int size)
         std::printf("[INFO] Frame decoded w: %d h: %d!!!\n", mCodecCtx->width, mCodecCtx->height);
 #endif
 
+        processor.process(mAvFrame);
+
         if (!publisher.isInitialized)
         {
             //status = publisher.init("rtmp://a.rtmp.youtube.com/live2/cxy2-h593-symr-44e8", mCodecCtx);
@@ -192,19 +194,19 @@ int MediaSession::decodeFrame(char *buffer, int size)
             if (status != 0)
             {
                 LOG_ERR("Failed to initialize publisher");
+                continue;
             }
             else
             {
-                publisher.start();
+                status = publisher.start();
+                if (status != 0)
+                {
+                    LOG_ERR("Failed to start publisher");
+                    continue;
+                }
             }
          }
-
-        if (publisher.isStarted)
-        {
-            publisher.pushPacket(&mAvPkt);
-        }
-
-        processor.process(mAvFrame);
+        publisher.pushPacket(&mAvPkt);
     }
 
     return 0;

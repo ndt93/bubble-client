@@ -9,6 +9,8 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
+#define FRAME_RATE 25
+
 Publisher::Publisher(int queue_size) :
     isInitialized(false), isStarted(false), mOutFmtCtx(NULL), mOutStream(NULL),
     mPktsQueue(queue_size), mPublishingThread(NULL)
@@ -64,30 +66,23 @@ void Publisher::publish()
         std::printf("[DEBUG] Publishing %d bytes packet @%p\n", packet.size, packet.data);
 #endif
         AVRational time_base = mOutStream->time_base;
-        //AVRational time_base_q = {1, AV_TIME_BASE};
+        AVRational time_base_s= {1, FRAME_RATE};
 
         if (packet.pts == AV_NOPTS_VALUE)
         {
             // Duration between 2 frames (us)
-			int64_t calc_duration=(double)AV_TIME_BASE/av_q2d(mOutStream->r_frame_rate);
-			packet.pts = (double)(frame_index*calc_duration)/(double)(av_q2d(time_base)*AV_TIME_BASE);
+            packet.pts = frame_index;
 			packet.dts = packet.pts;
-			packet.duration = (double)calc_duration/(double)(av_q2d(time_base)*AV_TIME_BASE);
+			packet.duration = 0;
         }
-        /*
-        int64_t pts_time = av_rescale_q(packet.dts, time_base, time_base_q);
-        int64_t now_time = av_gettime() - start_time;
-        if (pts_time > now_time)
-        {
-            av_usleep(pts_time - now_time);
-        }*/
+        av_packet_rescale_ts(&packet, time_base_s, mOutStream->time_base);
         packet.stream_index = 0;
         packet.pos = -1;
 
-#ifdef DEBUG
+//#ifdef DEBUG
         std::printf("[DEBUG] %lld %lld %lld\n", packet.pts, packet.dts, packet.duration);
         std::printf("[DEBUG] Send %8d video frames to output URL\n", frame_index);
-#endif
+//#endif
         frame_index++;
 
         status = av_interleaved_write_frame(mOutFmtCtx, &packet);
@@ -129,7 +124,7 @@ int Publisher::init(const char *url, const AVCodecContext *input_codec_ctx)
     }
     AVCodec *video_codec;
     AVOutputFormat *out_fmt;
-    AVRational r_frame_rate = {25, 1};
+    AVRational r_frame_rate = {FRAME_RATE, 1};
     int status;
 
     avformat_alloc_output_context2(&mOutFmtCtx, NULL, "flv", url);
@@ -150,7 +145,7 @@ int Publisher::init(const char *url, const AVCodecContext *input_codec_ctx)
     }
     avcodec_parameters_from_context(mOutStream->codecpar, input_codec_ctx);
     mOutStream->time_base.num = 1;
-    mOutStream->time_base.den = 25;
+    mOutStream->time_base.den = FRAME_RATE;
     av_stream_set_r_frame_rate(mOutStream, r_frame_rate);
 
     /*
