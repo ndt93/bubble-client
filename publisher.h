@@ -60,7 +60,7 @@ private:
                              int sample_rate, int nb_samples);
     int openAudioEncoder(AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg);
     AVFrame *getAudioFrame(OutputStream *ost);
-    AVPacket encodeAudioFrame(OutputStream *ost, int *got_packet);
+    int encodeAudioFrame(OutputStream *ost);
     void closeStream(OutputStream *ost);
 };
 

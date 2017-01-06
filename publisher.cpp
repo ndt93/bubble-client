@@ -63,57 +63,64 @@ void Publisher::publish()
     std::printf("[INFO] Publishing thread has started\n");
     AVFrame *video_frame;
     AVPacket video_pkt, audio_pkt;
-    int64_t start_time;
-    int got_packet;
     int status;
 
     memset(&video_pkt, 0, sizeof(AVPacket));
     av_init_packet(&video_pkt);
+    memset(&audio_pkt, 0, sizeof(AVPacket));
+    av_init_packet(&audio_pkt);
+
     mVideoOutStream.next_pts = 0;
-    start_time = av_gettime();
+
     while (isStarted)
     {
-        mFramesQueue.waitAndPop(video_frame);
-        encodeVideoFrame(&mVideoOutStream, video_frame);
-        status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
-        while (status == 0)
+        if (av_compare_ts(mVideoOutStream.next_pts, mVideoOutStream.enc->time_base,
+                          mAudioOutStream.next_pts, mAudioOutStream.enc->time_base) <= 0)
         {
-#ifdef DEBUG
-            std::printf("[DEBUG] Publishing %d bytes packet @%p\n", video_pkt.size, video_pkt.data);
-#endif
-            av_packet_rescale_ts(&video_pkt, (AVRational){1, STREAM_FRAME_RATE} , mVideoOutStream.st->time_base);
-            video_pkt.stream_index = mVideoOutStream.st->index;
-            video_pkt.pos = -1;
-#ifdef DEBUG
-            std::printf("[DEBUG] %lld %lld %lld\n", video_pkt.pts, video_pkt.dts, video_pkt.duration);
-            std::printf("[DEBUG] Send %8d video frames to output URL\n", mVideoOutStream.next_pts);
-#endif
-            status = av_interleaved_write_frame(mOutFmtCtx, &video_pkt);
-            if (status < 0) {
-                LOG_ERR("Publisher: Error muxing video packet");
-            }
+            mFramesQueue.waitAndPop(video_frame);
+            encodeVideoFrame(&mVideoOutStream, video_frame);
             status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
-        }
-        mVideoOutStream.next_pts++;
-
-
-        audio_pkt = encodeAudioFrame(&mAudioOutStream, &got_packet);
-        if (got_packet)
-        {
-            av_packet_rescale_ts(&audio_pkt, mAudioOutStream.enc->time_base, mAudioOutStream.st->time_base);
-            audio_pkt.stream_index = mAudioOutStream.st->index;
+            while (status == 0)
+            {
 #ifdef DEBUG
-            log_packet(mOutFmtCtx, &audio_pkt);
+                std::printf("[DEBUG] Publishing %d bytes packet @%p\n", video_pkt.size, video_pkt.data);
 #endif
-            status = av_interleaved_write_frame(mOutFmtCtx, &audio_pkt);
-            if (status < 0) {
-                LOG_ERR("Publisher: Error muxing audio packet");
+                av_packet_rescale_ts(&video_pkt, (AVRational){1, STREAM_FRAME_RATE} , mVideoOutStream.st->time_base);
+                video_pkt.stream_index = mVideoOutStream.st->index;
+                video_pkt.pos = -1;
+#ifdef DEBUG
+                std::printf("[DEBUG] %lld %lld %lld\n", video_pkt.pts, video_pkt.dts, video_pkt.duration);
+                std::printf("[DEBUG] Send %8d video frames to output URL\n", mVideoOutStream.next_pts);
+#endif
+                status = av_interleaved_write_frame(mOutFmtCtx, &video_pkt);
+                if (status < 0) {
+                    LOG_ERR("Publisher: Error muxing video packet");
+                }
+                status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
             }
+            mVideoOutStream.next_pts++;
+            av_packet_unref(&video_pkt);
+            av_frame_free(&video_frame);
         }
-
-        av_packet_unref(&video_pkt);
-        av_frame_free(&video_frame);
-        av_packet_unref(&audio_pkt);
+        else
+        {
+            encodeAudioFrame(&mAudioOutStream);
+            status = avcodec_receive_packet(mAudioOutStream.enc, &audio_pkt);
+            while (status == 0)
+            {
+                av_packet_rescale_ts(&audio_pkt, mAudioOutStream.enc->time_base, mAudioOutStream.st->time_base);
+                audio_pkt.stream_index = mAudioOutStream.st->index;
+#ifdef DEBUG
+                log_packet(mOutFmtCtx, &audio_pkt);
+#endif
+                status = av_interleaved_write_frame(mOutFmtCtx, &audio_pkt);
+                if (status < 0) {
+                    LOG_ERR("Publisher: Error muxing audio packet");
+                }
+                status = avcodec_receive_packet(mAudioOutStream.enc, &audio_pkt);
+            }
+            av_packet_unref(&audio_pkt);
+        }
     }
 }
 
@@ -561,28 +568,24 @@ AVFrame *Publisher::getAudioFrame(OutputStream *ost)
 /*
  * Encode one audio frame and save it to mAudioPkt
  */
-AVPacket Publisher::encodeAudioFrame(OutputStream *ost, int *got_packet)
+int Publisher::encodeAudioFrame(OutputStream *ost)
 {
 #ifdef DEBUG
     std::printf("[INFO] Encoding audio frame...\n");
 #endif
     AVCodecContext *c;
     AVFrame *frame;
-    AVPacket pkt;
     int ret;
     int dst_nb_samples;
 
     c = ost->enc;
-    memset(&pkt, 0, sizeof(AVPacket));
-    av_init_packet(&pkt);
 
     frame = getAudioFrame(ost);
 
     if (!frame)
     {
         LOG_ERR("Publisher: getAudioFrame failed");
-        *got_packet = 0;
-        return pkt;
+        return -1;
     }
 
     /* Convert samples from native format to destination codec format, using the resampler */
@@ -598,8 +601,7 @@ AVPacket Publisher::encodeAudioFrame(OutputStream *ost, int *got_packet)
     if (ret < 0)
     {
         LOG_ERR("Publisher: av_frame_make_writable");
-        *got_packet = 0;
-        return pkt;
+        return -1;
     }
 
     /* Convert to destination format */
@@ -608,8 +610,7 @@ AVPacket Publisher::encodeAudioFrame(OutputStream *ost, int *got_packet)
     if (ret < 0)
     {
         fprintf(stderr, "[ERROR] Error while converting\n");
-        *got_packet = 0;
-        return pkt;
+        return -1;
     }
     frame = ost->frame;
 
@@ -620,22 +621,12 @@ AVPacket Publisher::encodeAudioFrame(OutputStream *ost, int *got_packet)
     if (ret < 0)
     {
         fprintf(stderr, "[ERROR] avcodec_send_frame: %s\n", av_err2str(ret));
-        *got_packet = 0;
-        return pkt;
+        return -1;
     }
-    ret = avcodec_receive_packet(c, &pkt);
-    if (ret < 0)
-    {
-        fprintf(stderr, "[WARN] avcodec_receive_packet: %s\n", av_err2str(ret));
-        *got_packet = 0;
-        return pkt;
-    }
-
 #ifdef DEBUG
     std::printf("[INFO] Audio frame encoded to packet\n");
 #endif
-    *got_packet = 1;
-    return pkt;
+    return 0;
 }
 
 void Publisher::closeStream(OutputStream *ost)
