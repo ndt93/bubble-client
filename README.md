@@ -4,6 +4,8 @@ A client for the propriety `bubble` streaming prococol which is included in the 
 
 The protocol is reverse engineered through packets capturing and from a non-official version of the firmware's codes located at [zackxue/ipc](https://github.com/zackxue/ipc) and so may not be exhaustive or require modifications if a particular vendor makes any changes.
 
+This also includes an application to detect and track foreground objects using OpenCV and an application to reencode and republish the streams to another RTMP media server (in Publisher and Processor classes).
+
 ## Dependencies
 
 * *C++ Boost 1.63.0*
