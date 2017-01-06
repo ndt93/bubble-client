@@ -3,6 +3,7 @@
 
 extern "C" {
 #include <libavformat/avformat.h>
+#include <libavutil/timestamp.h>
 }
 #include "concurrent_queue.h"
 #include <boost/thread/thread.hpp>
@@ -47,21 +48,31 @@ private:
 
     void publish();
 
-    // Audio sampler. TODO: Replace with real audio from the camera
+    // Sample a dummy audio packet. TODO: Replace with real audio from the camera
     OutputStream mAudioOutStream;
-    AVPacket mAudioPkt;
 
     int initAudioOutputStream();
     AVFrame *allocAudioFrame(enum AVSampleFormat sample_fmt, uint64_t channel_layout,
                              int sample_rate, int nb_samples);
-    int openAudio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg);
+    int openAudio(AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg);
     /* Prepare a 16 bit dummy audio frame of 'frame_size' samples and
      * 'nb_channels' channels. */
     AVFrame *getAudioFrame(OutputStream *ost);
     /* Encode one audio frame and send it to the muxer
      * return 1 when encoding is finished, 0 otherwise */
-    int writeAudioFrame(AVFormatContext *oc, OutputStream *ost);
-    void closeStream(AVFormatContext *oc, OutputStream *ost);
+    AVPacket writeAudioFrame(OutputStream *ost, int *got_packet);
+    void closeStream(OutputStream *ost);
 };
+
+inline void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt)
+{
+    AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
+
+    printf("[DEBUG] pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d size:%d\n",
+           av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, time_base),
+           av_ts2str(pkt->dts), av_ts2timestr(pkt->dts, time_base),
+           av_ts2str(pkt->duration), av_ts2timestr(pkt->duration, time_base),
+           pkt->stream_index, pkt->size);
+}
 
 #endif

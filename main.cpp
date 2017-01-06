@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
     }
     std::printf("[INFO] User is logged in\n");
 
-    status = open_stream(session, 0, 0);
+    status = open_stream(session, 0, 1);
     if (status != 0)
     {
         LOG_ERR("Failed to open stream");

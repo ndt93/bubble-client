@@ -25,6 +25,10 @@ Publisher::~Publisher()
     {
         stop();
     }
+    av_write_trailer(mOutFmtCtx);
+
+    closeStream(&mAudioOutStream);
+
     if (mOutFmtCtx)
     {
         avformat_free_context(mOutFmtCtx);
@@ -53,9 +57,10 @@ int Publisher::start()
 void Publisher::publish()
 {
     std::printf("[INFO] Publishing thread has started\n");
-    AVPacket packet;
+    AVPacket packet, audio_pkt;
     int64_t start_time;
     int frame_index = 0;
+    int got_packet;
     int status;
 
     start_time = av_gettime();
@@ -65,29 +70,39 @@ void Publisher::publish()
 #ifdef DEBUG
         std::printf("[DEBUG] Publishing %d bytes packet @%p\n", packet.size, packet.data);
 #endif
-        AVRational time_base = mOutStream->time_base;
-        AVRational time_base_s= {1, FRAME_RATE};
-
         if (packet.pts == AV_NOPTS_VALUE)
         {
-            // Duration between 2 frames (us)
             packet.pts = frame_index;
 			packet.dts = packet.pts;
 			packet.duration = 0;
         }
-        av_packet_rescale_ts(&packet, time_base_s, mOutStream->time_base);
-        packet.stream_index = 0;
+        av_packet_rescale_ts(&packet, (AVRational){1, FRAME_RATE} , mOutStream->time_base);
+        packet.stream_index = mOutStream->index;
         packet.pos = -1;
 
-//#ifdef DEBUG
+#ifdef DEBUG
         std::printf("[DEBUG] %lld %lld %lld\n", packet.pts, packet.dts, packet.duration);
         std::printf("[DEBUG] Send %8d video frames to output URL\n", frame_index);
-//#endif
+#endif
         frame_index++;
 
         status = av_interleaved_write_frame(mOutFmtCtx, &packet);
         if (status < 0) {
-            LOG_ERR("Publisher: Error muxing packet");
+            LOG_ERR("Publisher: Error muxing video packet");
+        }
+
+        audio_pkt = writeAudioFrame(&mAudioOutStream, &got_packet);
+        if (got_packet)
+        {
+            av_packet_rescale_ts(&audio_pkt, mAudioOutStream.enc->time_base, mAudioOutStream.st->time_base);
+            audio_pkt.stream_index = mAudioOutStream.st->index;
+#ifdef DEBUG
+            log_packet(mOutFmtCtx, &audio_pkt);
+#endif
+            status = av_interleaved_write_frame(mOutFmtCtx, &audio_pkt);
+            if (status < 0) {
+                LOG_ERR("Publisher: Error muxing audio packet");
+            }
         }
 
         av_packet_unref(&packet);
@@ -110,8 +125,6 @@ int Publisher::stop()
         delete mPublishingThread;
         mPublishingThread = NULL;
     }
-
-    av_write_trailer(mOutFmtCtx);
 
     return 0;
 }
@@ -148,13 +161,12 @@ int Publisher::init(const char *url, const AVCodecContext *input_codec_ctx)
     mOutStream->time_base.den = FRAME_RATE;
     av_stream_set_r_frame_rate(mOutStream, r_frame_rate);
 
-    /*
     status = initAudioOutputStream();
     if (status != 0)
     {
         LOG_ERR("Failed to initialize audio output stream");
         goto on_error;
-    }*/
+    }
 
     av_dump_format(mOutFmtCtx, 0, url, 1);
 
@@ -162,7 +174,7 @@ int Publisher::init(const char *url, const AVCodecContext *input_codec_ctx)
     {
         status = avio_open(&mOutFmtCtx->pb, url, AVIO_FLAG_WRITE);
         if (status < 0) {
-            LOG_ERR("Publisher: failed to open output URL");
+            std::fprintf(stderr, "[ERROR] Publisher: failed to open output URL, %s\n", av_err2str(status));
             goto on_error;
         }
     }
@@ -218,8 +230,10 @@ int Publisher::pushPacket(const AVPacket *pkt)
 
 int Publisher::initAudioOutputStream()
 {
+    std::printf("[INFO] Initializing audio sampler...\n");
     AVCodec *audio_codec;
     AVCodecParameters *audio_codecpar;
+    int status;
 
     mAudioOutStream.st = avformat_new_stream(mOutFmtCtx, NULL);
     if (!mAudioOutStream.st)
@@ -261,15 +275,23 @@ int Publisher::initAudioOutputStream()
     audio_codecpar->channels = av_get_channel_layout_nb_channels(audio_codecpar->channel_layout);
     mAudioOutStream.st->time_base = (AVRational){1, audio_codecpar->sample_rate};
 
-    memset(&mAudioOutStream, 0, sizeof(AVPacket));
+    status = openAudio(audio_codec, &mAudioOutStream, NULL);
+    if (status != 0)
+    {
+        LOG_ERR("Publisher: openAudio failed");
+        closeStream(&mAudioOutStream);
+        return -1;
+    }
 
+    std::printf("[INFO] Initialized audio output stream and dummy audio packet\n");
     return 0;
 }
 
 AVFrame *Publisher::allocAudioFrame(enum AVSampleFormat sample_fmt,
-                                      uint64_t channel_layout,
-                                      int sample_rate, int nb_samples)
+                                    uint64_t channel_layout,
+                                    int sample_rate, int nb_samples)
 {
+    std::printf("[INFO] Allocating audio frame...\n");
     AVFrame *frame = av_frame_alloc();
     int ret;
 
@@ -295,22 +317,37 @@ AVFrame *Publisher::allocAudioFrame(enum AVSampleFormat sample_fmt,
         }
     }
 
+    std::printf("[INFO] Audio frame allocated \n");
     return frame;
 }
 
-int Publisher::openAudio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
+int Publisher::openAudio(AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
 {
+    std::printf("[INFO] Opening audio encoder...\n");
     AVCodecContext *c;
     int nb_samples;
     int ret;
     AVDictionary *opt = NULL;
 
-    c = ost->enc;
+    c = avcodec_alloc_context3(codec);
+    if (!c)
+    {
+        fprintf(stderr, "[ERROR] Could not alloc an encoding context\n");
+        return -1;
+    }
+    ost->enc = c;
+    c->sample_fmt = codec->sample_fmts ? codec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+    c->bit_rate = ost->st->codecpar->bit_rate;
+    c->sample_rate = ost->st->codecpar->sample_rate;
+    c->channels = ost->st->codecpar->channels;
+    c->channel_layout = ost->st->codecpar->channel_layout;
+    c->time_base = ost->st->time_base;
 
     av_dict_copy(&opt, opt_arg, 0);
     ret = avcodec_open2(c, codec, &opt);
     av_dict_free(&opt);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         fprintf(stderr, "[ERROR] Could not open audio codec: %s\n", av_err2str(ret));
         return -1;
     }
@@ -358,11 +395,13 @@ int Publisher::openAudio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost,
     av_opt_set_sample_fmt(ost->swr_ctx, "out_sample_fmt", c->sample_fmt, 0);
 
     /* Initialize the resampling context */
-    if ((ret = swr_init(ost->swr_ctx)) < 0) {
+    if ((ret = swr_init(ost->swr_ctx)) < 0)
+    {
         fprintf(stderr, "[ERROR] Failed to initialize the resampling context\n");
         return -1;
     }
 
+    std::printf("[INFO] Audio encoder is ready\n");
     return 0;
 }
 
@@ -370,6 +409,9 @@ int Publisher::openAudio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost,
  * 'nb_channels' channels. */
 AVFrame *Publisher::getAudioFrame(OutputStream *ost)
 {
+#ifdef DEBUG
+    std::printf("[INFO] Sample a raw audio frame\n");
+#endif
     AVFrame *frame = ost->tmp_frame;
     int j, i, v;
     int16_t *q = (int16_t*)frame->data[0];
@@ -388,74 +430,97 @@ AVFrame *Publisher::getAudioFrame(OutputStream *ost)
     frame->pts = ost->next_pts;
     ost->next_pts  += frame->nb_samples;
 
+#ifdef DEBUG
+    std::printf("[INFO] Raw audio frame is generated\n");
+#endif
     return frame;
 }
 
 /*
- * encode one audio frame and send it to the muxer
- * return 1 when encoding is finished, 0 otherwise
+ * Encode one audio frame and save it to mAudioPkt
  */
-int Publisher::writeAudioFrame(AVFormatContext *oc, OutputStream *ost)
+AVPacket Publisher::writeAudioFrame(OutputStream *ost, int *got_packet)
 {
+#ifdef DEBUG
+    std::printf("[INFO] Encoding audio frame...\n");
+#endif
     AVCodecContext *c;
     AVFrame *frame;
+    AVPacket pkt;
     int ret;
-    int got_packet;
     int dst_nb_samples;
 
-    av_init_packet(&mAudioPkt);
     c = ost->enc;
+    memset(&pkt, 0, sizeof(AVPacket));
+    av_init_packet(&pkt);
 
     frame = getAudioFrame(ost);
 
-    if (frame)
+    if (!frame)
     {
-        /* Convert samples from native format to destination codec format, using the resampler */
-        /* Compute destination number of samples */
-        dst_nb_samples = av_rescale_rnd(swr_get_delay(ost->swr_ctx, c->sample_rate) + frame->nb_samples,
-                                        c->sample_rate, c->sample_rate, AV_ROUND_UP);
-        av_assert0(dst_nb_samples == frame->nb_samples);
-
-        /* When we pass a frame to the encoder, it may keep a reference to it
-         * internally; make sure we do not overwrite it here
-         */
-        ret = av_frame_make_writable(ost->frame);
-        if (ret < 0)
-        {
-            LOG_ERR("Publisher: av_frame_make_writable");
-            return -1;
-        }
-
-        /* Convert to destination format */
-        ret = swr_convert(ost->swr_ctx, ost->frame->data, dst_nb_samples,
-                          (const uint8_t **) frame->data, frame->nb_samples);
-        if (ret < 0)
-        {
-            fprintf(stderr, "[ERROR] Error while converting\n");
-            return -1;
-        }
-        frame = ost->frame;
-
-        frame->pts = av_rescale_q(ost->samples_count, (AVRational){1, c->sample_rate}, c->time_base);
-        ost->samples_count += dst_nb_samples;
+        LOG_ERR("Publisher: getAudioFrame failed");
+        *got_packet = 0;
+        return pkt;
     }
 
-    ret = avcodec_encode_audio2(c, &mAudioPkt, frame, &got_packet);
+    /* Convert samples from native format to destination codec format, using the resampler */
+    /* Compute destination number of samples */
+    dst_nb_samples = av_rescale_rnd(swr_get_delay(ost->swr_ctx, c->sample_rate) + frame->nb_samples,
+                                    c->sample_rate, c->sample_rate, AV_ROUND_UP);
+    av_assert0(dst_nb_samples == frame->nb_samples);
+
+    /* When we pass a frame to the encoder, it may keep a reference to it
+     * internally; make sure we do not overwrite it here
+     */
+    ret = av_frame_make_writable(ost->frame);
     if (ret < 0)
     {
-        fprintf(stderr, "[ERROR] Error encoding audio frame: %s\n", av_err2str(ret));
-        return -1;
+        LOG_ERR("Publisher: av_frame_make_writable");
+        *got_packet = 0;
+        return pkt;
     }
 
-    return (frame || got_packet) ? 0 : -1;
+    /* Convert to destination format */
+    ret = swr_convert(ost->swr_ctx, ost->frame->data, dst_nb_samples,
+                      (const uint8_t **) frame->data, frame->nb_samples);
+    if (ret < 0)
+    {
+        fprintf(stderr, "[ERROR] Error while converting\n");
+        *got_packet = 0;
+        return pkt;
+    }
+    frame = ost->frame;
+
+    frame->pts = av_rescale_q(ost->samples_count, (AVRational){1, c->sample_rate}, c->time_base);
+    ost->samples_count += dst_nb_samples;
+
+    ret = avcodec_send_frame(c, frame);
+    if (ret < 0)
+    {
+        fprintf(stderr, "[ERROR] avcodec_send_frame: %s\n", av_err2str(ret));
+        *got_packet = 0;
+        return pkt;
+    }
+    ret = avcodec_receive_packet(c, &pkt);
+    if (ret < 0)
+    {
+        fprintf(stderr, "[WARN] avcodec_receive_packet: %s\n", av_err2str(ret));
+        *got_packet = 0;
+        return pkt;
+    }
+
+#ifdef DEBUG
+    std::printf("[INFO] Audio frame encoded to packet\n");
+#endif
+    *got_packet = 1;
+    return pkt;
 }
 
-void Publisher::closeStream(AVFormatContext *oc, OutputStream *ost)
+void Publisher::closeStream(OutputStream *ost)
 {
     avcodec_free_context(&ost->enc);
     av_frame_free(&ost->frame);
     av_frame_free(&ost->tmp_frame);
     sws_freeContext(ost->sws_ctx);
     swr_free(&ost->swr_ctx);
-    av_packet_unref(&mAudioPkt);
 }

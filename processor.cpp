@@ -34,8 +34,8 @@ int Processor::process(AVFrame *frame)
     int status;
     int width = frame->width;
     int height = frame->height;
-    int dest_width = width / 2;
-    int dest_height = height / 2;
+    int dest_width = width;
+    int dest_height = height;
 
     status = allocateConversionCtx((enum AVPixelFormat)frame->format, width, height, dest_width, dest_height);
     if (status < 0)

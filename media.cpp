@@ -189,8 +189,8 @@ int MediaSession::decodeFrame(char *buffer, int size)
 
         if (!publisher.isInitialized)
         {
-            //status = publisher.init("rtmp://a.rtmp.youtube.com/live2/cxy2-h593-symr-44e8", mCodecCtx);
-            status = publisher.init("out.flv", mCodecCtx);
+            status = publisher.init("rtmp://a.rtmp.youtube.com/live2/cxy2-h593-symr-44e8", mCodecCtx);
+            //status = publisher.init("out.flv", mCodecCtx);
             if (status != 0)
             {
                 LOG_ERR("Failed to initialize publisher");
