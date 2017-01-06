@@ -23,7 +23,7 @@ MediaSession::~MediaSession()
     }
     if (mAvFrame)
     {
-        av_free(mAvFrame);
+        av_frame_free(&mAvFrame);
     }
 }
 
@@ -53,9 +53,8 @@ int MediaSession::init()
 on_error:
     avcodec_close(mCodecCtx);
     av_free(mCodecCtx);
-    av_free(mAvFrame);
+    av_frame_free(&mAvFrame);
     mCodecCtx = NULL;
-    mAvFrame = NULL;
     return -1;
 }
 
@@ -189,8 +188,8 @@ int MediaSession::decodeFrame(char *buffer, int size)
 
         if (!publisher.isInitialized)
         {
-            status = publisher.init("rtmp://a.rtmp.youtube.com/live2/cxy2-h593-symr-44e8", mCodecCtx);
-            //status = publisher.init("out.flv", mCodecCtx);
+            //status = publisher.init("rtmp://a.rtmp.youtube.com/live2/cxy2-h593-symr-44e8", mCodecCtx);
+            status = publisher.init("out.flv", mCodecCtx);
             if (status != 0)
             {
                 LOG_ERR("Failed to initialize publisher");
@@ -206,7 +205,7 @@ int MediaSession::decodeFrame(char *buffer, int size)
                 }
             }
          }
-        publisher.pushPacket(&mAvPkt);
+        publisher.pushFrame(mAvFrame);
     }
 
     return 0;

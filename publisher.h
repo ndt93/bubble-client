@@ -38,14 +38,18 @@ public:
     int start();
     int stop();
 
-    int pushPacket(const AVPacket *pkt);
+    int pushFrame(const AVFrame *frame);
 private:
     AVFormatContext *mOutFmtCtx;
-    AVStream *mOutStream;
+    OutputStream mVideoOutStream;
 
-    ConcurrentQueue<AVPacket> mPktsQueue;
+    ConcurrentQueue<AVFrame *> mFramesQueue;
     boost::thread *mPublishingThread;
 
+    int initVideoOutputStream(AVCodec *codec, OutputStream *ost,
+                              const AVCodecContext *input_ctx, AVDictionary *opt_arg);
+    int allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int src_w, int src_h, int dst_w, int dst_h);
+    int encodeVideoFrame(OutputStream *ost, AVFrame *frame);
     void publish();
 
     // Sample a dummy audio packet. TODO: Replace with real audio from the camera
@@ -54,13 +58,9 @@ private:
     int initAudioOutputStream();
     AVFrame *allocAudioFrame(enum AVSampleFormat sample_fmt, uint64_t channel_layout,
                              int sample_rate, int nb_samples);
-    int openAudio(AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg);
-    /* Prepare a 16 bit dummy audio frame of 'frame_size' samples and
-     * 'nb_channels' channels. */
+    int openAudioEncoder(AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg);
     AVFrame *getAudioFrame(OutputStream *ost);
-    /* Encode one audio frame and send it to the muxer
-     * return 1 when encoding is finished, 0 otherwise */
-    AVPacket writeAudioFrame(OutputStream *ost, int *got_packet);
+    AVPacket encodeAudioFrame(OutputStream *ost, int *got_packet);
     void closeStream(OutputStream *ost);
 };
 

@@ -5,15 +5,18 @@ extern "C" {
 #include <libavutil/time.h>
 #include <libavutil/opt.h>
 #include <libavutil/avassert.h>
+#include <libavutil/imgutils.h>
+#include <libswscale/swscale.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 }
 
-#define FRAME_RATE 25
+#define STREAM_FRAME_RATE 25
+#define OUT_RES_WIDTH 640
+#define OUT_RES_HEIGHT 360
 
 Publisher::Publisher(int queue_size) :
-    isInitialized(false), isStarted(false), mOutFmtCtx(NULL), mOutStream(NULL),
-    mPktsQueue(queue_size), mPublishingThread(NULL)
+    isInitialized(false), isStarted(false), mOutFmtCtx(NULL), mFramesQueue(queue_size), mPublishingThread(NULL)
 {
     av_register_all();
     avformat_network_init();
@@ -27,6 +30,7 @@ Publisher::~Publisher()
     }
     av_write_trailer(mOutFmtCtx);
 
+    closeStream(&mVideoOutStream);
     closeStream(&mAudioOutStream);
 
     if (mOutFmtCtx)
@@ -57,41 +61,43 @@ int Publisher::start()
 void Publisher::publish()
 {
     std::printf("[INFO] Publishing thread has started\n");
-    AVPacket packet, audio_pkt;
+    AVFrame *video_frame;
+    AVPacket video_pkt, audio_pkt;
     int64_t start_time;
-    int frame_index = 0;
     int got_packet;
     int status;
 
+    memset(&video_pkt, 0, sizeof(AVPacket));
+    av_init_packet(&video_pkt);
+    mVideoOutStream.next_pts = 0;
     start_time = av_gettime();
     while (isStarted)
     {
-        mPktsQueue.waitAndPop(packet);
-#ifdef DEBUG
-        std::printf("[DEBUG] Publishing %d bytes packet @%p\n", packet.size, packet.data);
-#endif
-        if (packet.pts == AV_NOPTS_VALUE)
+        mFramesQueue.waitAndPop(video_frame);
+        encodeVideoFrame(&mVideoOutStream, video_frame);
+        status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
+        while (status == 0)
         {
-            packet.pts = frame_index;
-			packet.dts = packet.pts;
-			packet.duration = 0;
-        }
-        av_packet_rescale_ts(&packet, (AVRational){1, FRAME_RATE} , mOutStream->time_base);
-        packet.stream_index = mOutStream->index;
-        packet.pos = -1;
-
 #ifdef DEBUG
-        std::printf("[DEBUG] %lld %lld %lld\n", packet.pts, packet.dts, packet.duration);
-        std::printf("[DEBUG] Send %8d video frames to output URL\n", frame_index);
+            std::printf("[DEBUG] Publishing %d bytes packet @%p\n", video_pkt.size, video_pkt.data);
 #endif
-        frame_index++;
-
-        status = av_interleaved_write_frame(mOutFmtCtx, &packet);
-        if (status < 0) {
-            LOG_ERR("Publisher: Error muxing video packet");
+            av_packet_rescale_ts(&video_pkt, (AVRational){1, STREAM_FRAME_RATE} , mVideoOutStream.st->time_base);
+            video_pkt.stream_index = mVideoOutStream.st->index;
+            video_pkt.pos = -1;
+#ifdef DEBUG
+            std::printf("[DEBUG] %lld %lld %lld\n", video_pkt.pts, video_pkt.dts, video_pkt.duration);
+            std::printf("[DEBUG] Send %8d video frames to output URL\n", mVideoOutStream.next_pts);
+#endif
+            status = av_interleaved_write_frame(mOutFmtCtx, &video_pkt);
+            if (status < 0) {
+                LOG_ERR("Publisher: Error muxing video packet");
+            }
+            status = avcodec_receive_packet(mVideoOutStream.enc, &video_pkt);
         }
+        mVideoOutStream.next_pts++;
 
-        audio_pkt = writeAudioFrame(&mAudioOutStream, &got_packet);
+
+        audio_pkt = encodeAudioFrame(&mAudioOutStream, &got_packet);
         if (got_packet)
         {
             av_packet_rescale_ts(&audio_pkt, mAudioOutStream.enc->time_base, mAudioOutStream.st->time_base);
@@ -105,7 +111,9 @@ void Publisher::publish()
             }
         }
 
-        av_packet_unref(&packet);
+        av_packet_unref(&video_pkt);
+        av_frame_free(&video_frame);
+        av_packet_unref(&audio_pkt);
     }
 }
 
@@ -137,7 +145,6 @@ int Publisher::init(const char *url, const AVCodecContext *input_codec_ctx)
     }
     AVCodec *video_codec;
     AVOutputFormat *out_fmt;
-    AVRational r_frame_rate = {FRAME_RATE, 1};
     int status;
 
     avformat_alloc_output_context2(&mOutFmtCtx, NULL, "flv", url);
@@ -150,16 +157,12 @@ int Publisher::init(const char *url, const AVCodecContext *input_codec_ctx)
     out_fmt = mOutFmtCtx->oformat;
 
     video_codec = avcodec_find_encoder(input_codec_ctx->codec_id);
-    mOutStream = avformat_new_stream(mOutFmtCtx, NULL);
-    if (!mOutStream)
+    status = initVideoOutputStream(video_codec, &mVideoOutStream, input_codec_ctx, NULL);
+    if (status != 0)
     {
-        LOG_ERR("Publisher: video avformat_new_stream failed");
+        LOG_ERR("Failed to initialize video output stream");
         goto on_error;
     }
-    avcodec_parameters_from_context(mOutStream->codecpar, input_codec_ctx);
-    mOutStream->time_base.num = 1;
-    mOutStream->time_base.den = FRAME_RATE;
-    av_stream_set_r_frame_rate(mOutStream, r_frame_rate);
 
     status = initAudioOutputStream();
     if (status != 0)
@@ -201,31 +204,150 @@ on_error:
     return -1;
 }
 
-int Publisher::pushPacket(const AVPacket *pkt)
+int Publisher::pushFrame(const AVFrame *frame)
 {
-    AVPacket new_pkt;
-    int status;
-
-    status = av_new_packet(&new_pkt, pkt->size);
-    if (status != 0)
+    AVFrame *new_frame = av_frame_clone(frame);
+    if (!new_frame)
     {
-        LOG_ERR("Publisher: failed to create new AvPacket");
-        return -1;
-    }
-    status = av_copy_packet(&new_pkt, pkt);
-    if (status != 0)
-    {
-        LOG_ERR("Publisher: failed to create copy packet");
+        LOG_ERR("Publisher: Failed to allocate new frame");
         return -1;
     }
 
-    if (mPktsQueue.tryPush(new_pkt))
+    if (mFramesQueue.tryPush(new_frame))
     {
         return 0;
     }
     LOG_WARN("Publisher: queue is full");
-    av_packet_unref(&new_pkt);
     return -1;
+}
+
+int Publisher::initVideoOutputStream(AVCodec *codec, OutputStream *ost,
+                                     const AVCodecContext *input_ctx, AVDictionary *opt_arg)
+{
+    std::printf("[INFO] Initializing video output stream and encoder...\n");
+    int ret;
+    AVCodecContext *c;
+    AVDictionary *opt = NULL;
+
+    c = avcodec_alloc_context3(codec);
+    if (!c) {
+        fprintf(stderr, "[ERROR] Could not alloc an encoding context\n");
+        closeStream(ost);
+        return -1;
+    }
+    ost->enc = c;
+
+    c->codec_id = codec->id;
+    c->bit_rate = 400000;
+    c->width = OUT_RES_WIDTH;
+    c->height = OUT_RES_HEIGHT;
+    c->time_base = (AVRational){1, STREAM_FRAME_RATE};
+    c->gop_size = 12; /* emit one intra frame every twelve frames at most */
+    c->pix_fmt = input_ctx->pix_fmt ;
+    if (c->codec_id == AV_CODEC_ID_MPEG2VIDEO)
+    {
+        c->max_b_frames = 2;
+    }
+    if (c->codec_id == AV_CODEC_ID_MPEG1VIDEO)
+    {
+        c->mb_decision = 2;
+    }
+
+    av_dict_copy(&opt, opt_arg, 0);
+
+    ret = avcodec_open2(c, codec, &opt);
+    av_dict_free(&opt);
+    if (ret < 0)
+    {
+        fprintf(stderr, "[ERROR] Could not open video codec: %s\n", av_err2str(ret));
+        closeStream(ost);
+        return -1;
+    }
+
+    ost->st = avformat_new_stream(mOutFmtCtx, NULL);
+    ret = avcodec_parameters_from_context(ost->st->codecpar, c);
+    if (ret < 0)
+    {
+        fprintf(stderr, "[ERROR] Could not copy the stream parameters\n");
+        closeStream(ost);
+        return -1;
+    }
+    ost->st->time_base = c->time_base;
+
+    ret = allocateConversionCtx(input_ctx->pix_fmt, input_ctx->width, input_ctx->height,
+                                OUT_RES_WIDTH, OUT_RES_HEIGHT);
+    if (ret < 0)
+    {
+        fprintf(stderr, "[ERROR] Publisher: allocateConversionCtx\n");
+        closeStream(ost);
+        return -1;
+    }
+
+    std::printf("[INFO] Initialized video output stream and encoder...\n");
+    return 0;
+}
+
+int Publisher::allocateConversionCtx(enum AVPixelFormat src_pix_fmt, int src_w, int src_h, int dst_w, int dst_h)
+{
+    std::printf("[INFO] Allocating conversion context...\n");
+    uint8_t *frame_buffer;
+    mVideoOutStream.sws_ctx = sws_getContext(src_w, src_h, src_pix_fmt, dst_w, dst_h,
+                                             src_pix_fmt, SWS_BICUBIC, NULL, NULL, NULL);
+    if (!mVideoOutStream.sws_ctx)
+    {
+        LOG_ERR("Failed to allocate sws context");
+        return -1;
+    }
+
+    mVideoOutStream.frame = av_frame_alloc();
+    if (!mVideoOutStream.frame)
+    {
+        LOG_ERR("Failed to allocate RGB frame");
+        return -1;
+    }
+    mVideoOutStream.frame->width = dst_w;
+    mVideoOutStream.frame->height = dst_h;
+    mVideoOutStream.frame->format = src_pix_fmt;
+
+    int nbytes = av_image_get_buffer_size(src_pix_fmt, dst_w, dst_h, 1);
+    frame_buffer = (uint8_t *)av_malloc(nbytes);
+    if (!frame_buffer)
+    {
+        LOG_ERR("Failed to allocate RGB frame buffer");
+        return -1;
+    }
+    av_image_fill_arrays(mVideoOutStream.frame->data, mVideoOutStream.frame->linesize, frame_buffer,
+                         src_pix_fmt, dst_w, dst_h, 1);
+    return 0;
+}
+
+int Publisher::encodeVideoFrame(OutputStream *ost, AVFrame *frame)
+{
+#ifdef DEBUG
+    std::printf("[INFO] Encoding video frame...\n");
+#endif
+    int ret;
+
+    ret = sws_scale(ost->sws_ctx, frame->data, frame->linesize, 0, frame->height,
+                    ost->frame->data, ost->frame->linesize);
+    if (ret < 0)
+    {
+        return -1;
+    }
+
+    ost->frame->pts = ost->next_pts;
+
+    ret = avcodec_send_frame(ost->enc, ost->frame);
+    if (ret < 0)
+    {
+        fprintf(stderr, "[ERROR] video avcodec_send_frame: %s\n", av_err2str(ret));
+        return -1;
+    }
+
+#ifdef DEBUG
+    std::printf("[INFO] Got video frame\n");
+#endif
+    return 0;
 }
 
 int Publisher::initAudioOutputStream()
@@ -275,7 +397,7 @@ int Publisher::initAudioOutputStream()
     audio_codecpar->channels = av_get_channel_layout_nb_channels(audio_codecpar->channel_layout);
     mAudioOutStream.st->time_base = (AVRational){1, audio_codecpar->sample_rate};
 
-    status = openAudio(audio_codec, &mAudioOutStream, NULL);
+    status = openAudioEncoder(audio_codec, &mAudioOutStream, NULL);
     if (status != 0)
     {
         LOG_ERR("Publisher: openAudio failed");
@@ -321,7 +443,7 @@ AVFrame *Publisher::allocAudioFrame(enum AVSampleFormat sample_fmt,
     return frame;
 }
 
-int Publisher::openAudio(AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
+int Publisher::openAudioEncoder(AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
 {
     std::printf("[INFO] Opening audio encoder...\n");
     AVCodecContext *c;
@@ -439,7 +561,7 @@ AVFrame *Publisher::getAudioFrame(OutputStream *ost)
 /*
  * Encode one audio frame and save it to mAudioPkt
  */
-AVPacket Publisher::writeAudioFrame(OutputStream *ost, int *got_packet)
+AVPacket Publisher::encodeAudioFrame(OutputStream *ost, int *got_packet)
 {
 #ifdef DEBUG
     std::printf("[INFO] Encoding audio frame...\n");
