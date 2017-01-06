@@ -6,7 +6,7 @@ The protocol is reverse engineered through packets capturing and from a non-offi
 
 ## Dependencies
 
-* *C++ Boost 1.63.0* (Boost Asio in particular)
+* *C++ Boost 1.63.0*
 * *FFMPEG 3.2.2*
 * *OpenCV 3* (This is used for an example processing application and can be optionally removed by removing the `Processor` class and OpenCV compilation flags in `Makefile`)
 

@@ -138,18 +138,6 @@ int MediaSession::processPacket(char *packet)
     case MT_PSLICE:
     {
         status = decodeFrame(framedata, uiMediaPackLen);
-        if (!publisher.isInitialized && status == 0)
-        {
-            status = publisher.init("out.mp4", mCodecCtx);
-            if (status != 0)
-            {
-                LOG_ERR("Failed to initialize publisher");
-            }
-            else
-            {
-                publisher.start();
-            }
-        }
         /*framecount++;
         if (framecount == 0) {
             session_start = clock();
@@ -174,11 +162,6 @@ int MediaSession::decodeFrame(char *buffer, int size)
     mAvPkt.size = size;
     mAvPkt.data = (uint8_t *)buffer;
 
-    if (publisher.isStarted)
-    {
-        publisher.pushPacket(&mAvPkt);
-    }
-
     status = avcodec_send_packet(mCodecCtx, &mAvPkt);
     if (status != 0)
     {
@@ -201,6 +184,26 @@ int MediaSession::decodeFrame(char *buffer, int size)
 #ifdef DEBUG
         std::printf("[INFO] Frame decoded w: %d h: %d!!!\n", mCodecCtx->width, mCodecCtx->height);
 #endif
+
+        if (!publisher.isInitialized)
+        {
+            //status = publisher.init("rtmp://a.rtmp.youtube.com/live2/cxy2-h593-symr-44e8", mCodecCtx);
+            status = publisher.init("out.flv", mCodecCtx);
+            if (status != 0)
+            {
+                LOG_ERR("Failed to initialize publisher");
+            }
+            else
+            {
+                publisher.start();
+            }
+         }
+
+        if (publisher.isStarted)
+        {
+            publisher.pushPacket(&mAvPkt);
+        }
+
         processor.process(mAvFrame);
     }
 

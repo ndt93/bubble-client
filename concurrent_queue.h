@@ -10,20 +10,21 @@ class ConcurrentQueue
 {
 private:
     std::queue<Data> mQueue;
-    size_t mSize;
+    size_t mMaxSize;
     mutable boost::mutex mMutex;
     boost::condition_variable mConsumerNotifier;
     boost::condition_variable mProducerNotifier;
 public:
-    ConcurrentQueue(size_t size=0)
+    /* Sets max_size = 0 for unbounded queue */
+    ConcurrentQueue(size_t max_size=100)
     {
-        mSize = size;
+        mMaxSize = max_size;
     }
 
     bool tryPush(Data const& data)
     {
         boost::mutex::scoped_lock lock(mMutex);
-        if (mSize == 0 || mQueue.size() < mSize)
+        if (mMaxSize == 0 || mQueue.size() < mMaxSize)
         {
             mQueue.push(data);
             lock.unlock();
@@ -37,7 +38,7 @@ public:
     void waitAndPush(Data const& data)
     {
         boost::mutex::scoped_lock lock(mMutex);
-        while (mSize > 0 && mQueue.size() >= mSize)
+        while (mMaxSize > 0 && mQueue.size() >= mMaxSize)
         {
             mProducerNotifier.wait(lock);
         }
@@ -50,6 +51,12 @@ public:
     {
         boost::mutex::scoped_lock lock(mMutex);
         return mQueue.empty();
+    }
+
+    size_t size() const
+    {
+        boost::mutex::scoped_lock lock(mMutex);
+        return mQueue.size();
     }
 
     bool tryPop(Data& popped_value)
