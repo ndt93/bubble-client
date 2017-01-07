@@ -4,7 +4,6 @@
 #include "session.h"
 #include "bubble_def.h"
 #include "macro_def.h"
-#include "util.h"
 #include "processor.h"
 #include "publisher.h"
 #include <boost/atomic.hpp>
